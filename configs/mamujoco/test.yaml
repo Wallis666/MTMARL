@@ -1,0 +1,22 @@
+# MultiTaskMaMuJoCo 冒烟测试用配置。
+#
+# 在 `domains` 下逐个列出要加载的机器人域，每个域至少需要包含
+# `tasks` 字段，列出该域内要参与训练 / 测试的子任务名。
+# 其余键值（如 `agent_conf`）将作为关键字参数透传给对应的环境类。
+
+domains:
+  half_cheetah:
+    agent_conf: "2x3"
+    tasks:
+      - run
+      - run_backwards
+      - jump
+      - run_front
+      - run_back
+
+  humanoid:
+    agent_conf: "9|8"
+    tasks:
+      - stand
+      - walk
+      - run
