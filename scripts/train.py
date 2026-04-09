@@ -31,7 +31,7 @@ from src.models.critic import TwinQCritic
 from src.models.dynamics import SoftMoEDynamics
 from src.models.obs_encoder import ObsEncoder
 from src.models.reward import SparseMoERewardModel
-from utils.logger import TensorBoardLogger
+from src.utils.logger import TensorBoardLogger
 from src.utils.two_hot import TwoHotProcessor
 from src.wrappers import ShareDummyVecEnv, ShareSubprocVecEnv
 
