@@ -60,7 +60,7 @@ algo:
   critic_lr: 0.0003
   consistency_coef: 1.0
   reward_coef: 1.0
-  balance_coef: 0.01
+  balance_coef: 0.0  # MoE 负载均衡损失暂时关闭，先跑通 baseline
   rho: 0.5
   grad_clip_norm: 10.0
 

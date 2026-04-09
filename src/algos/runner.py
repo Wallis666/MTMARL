@@ -50,7 +50,7 @@ from tqdm import tqdm
 
 from src.algos.trainer import WorldModelTrainer
 from src.buffers.replay_buffer import ReplayBuffer
-from utils.logger import TensorBoardLogger
+from src.utils.logger import TensorBoardLogger
 from src.wrappers.base import ShareVecEnv
 
 
@@ -257,17 +257,22 @@ class Runner:
             global_step: 当前训练步数，仅用于日志打印。
 
         返回:
-            ``{task_name: mean_return}`` 字典。
+            ``{display_name: mean_return}`` 字典。
         """
         self.trainer.eval()
         try:
-            task_names = self._collect_task_names()
+            display_names = self._collect_display_task_names()
+            n_tasks = len(display_names)
             results: dict[str, float] = {}
             print(f"\n[评估] global_step={global_step}")
-            for task_name in task_names:
-                mean_return = self._evaluate_single_task(task_name)
-                results[task_name] = mean_return
-                print(f"  task={task_name:<16s} mean_return={mean_return:.3f}")
+            for task_index in range(n_tasks):
+                display_name = display_names[task_index]
+                mean_return = self._evaluate_single_task(task_index)
+                results[display_name] = mean_return
+                print(
+                    f"  task={display_name:<24s} "
+                    f"mean_return={mean_return:.3f}",
+                )
             if self.logger is not None:
                 self.logger.log(
                     {f"eval/{task}": value for task, value in results.items()},
@@ -389,22 +394,26 @@ class Runner:
             loss_strs = [f"{key}={value:.4f}" for key, value in latest_losses.items()]
             print("  " + "  ".join(loss_strs))
 
-    def _collect_task_names(self) -> list[str]:
-        """从训练环境中提取一份去重的全局任务名列表。"""
+    def _collect_display_task_names(self) -> list[str]:
+        """
+        从训练环境中提取一份用于展示 / TensorBoard 的全局任务名列表。
+
+        ``ShareVecEnv.get_task_names()`` 返回的是 ``[per_env_list, ...]``
+        的嵌套结构；因为所有 env 共享同一份任务集合，这里直接取第 0
+        个 env 的列表即可。
+        """
         nested = self.train_env.get_task_names()
-        seen: list[str] = []
-        for per_env in nested:
-            for name in per_env:
-                if name not in seen:
-                    seen.append(name)
-        return seen
+        if isinstance(nested, list) and nested and isinstance(nested[0], list):
+            return list(nested[0])
+        return list(nested)
 
     def _evaluate_single_task(
         self,
-        task_name: str,
+        task_index: int,
     ) -> float:
         """对单个任务跑 ``eval_episodes`` 个回合并返回平均回报。"""
-        self.eval_env.reset_task(task_name)
+        # 用整数索引切换任务，避免依赖 ``reset_task`` 的字符串名约定
+        self.eval_env.reset_task(task_index)
         obs, _, _ = self.eval_env.reset()
 
         per_env_return = np.zeros(self.eval_env.num_envs, dtype=np.float32)
