@@ -65,5 +65,6 @@ algo:
   grad_clip_norm: 10.0
 
 runtime:
-  device: "cpu"  # 有 GPU 时改为 "cuda"
+  device: "cuda"  # 没 GPU 时改为 "cpu"
   seed: 0
+  log_dir: "runs/train_small"

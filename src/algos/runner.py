@@ -50,6 +50,7 @@ from tqdm import tqdm
 
 from src.algos.trainer import WorldModelTrainer
 from src.buffers.replay_buffer import ReplayBuffer
+from utils.logger import TensorBoardLogger
 from src.wrappers.base import ShareVecEnv
 
 
@@ -76,6 +77,7 @@ class Runner:
         eval_interval: int = 10_000,
         eval_episodes: int = 5,
         log_interval: int = 1_000,
+        logger: TensorBoardLogger | None = None,
     ) -> None:
         """
         参数:
@@ -108,6 +110,7 @@ class Runner:
         self.eval_interval = eval_interval
         self.eval_episodes = eval_episodes
         self.log_interval = log_interval
+        self.logger = logger
 
         self.num_envs = train_env.num_envs
         self.n_agents = train_env.n_agents
@@ -218,6 +221,15 @@ class Runner:
                     start_time=start_time,
                     latest_losses=latest_losses,
                 )
+                if self.logger is not None:
+                    self.logger.log(
+                        {
+                            "train/ep_return": mean_return,
+                            "train/buffer_size": float(len(self.buffer)),
+                            **latest_losses,
+                        },
+                        step=global_step,
+                    )
 
             # 7) 评估
             if (
@@ -256,6 +268,11 @@ class Runner:
                 mean_return = self._evaluate_single_task(task_name)
                 results[task_name] = mean_return
                 print(f"  task={task_name:<16s} mean_return={mean_return:.3f}")
+            if self.logger is not None:
+                self.logger.log(
+                    {f"eval/{task}": value for task, value in results.items()},
+                    step=global_step,
+                )
         finally:
             self.trainer.train()
         return results

@@ -31,6 +31,7 @@ from src.models.critic import TwinQCritic
 from src.models.dynamics import SoftMoEDynamics
 from src.models.obs_encoder import ObsEncoder
 from src.models.reward import SparseMoERewardModel
+from utils.logger import TensorBoardLogger
 from src.utils.two_hot import TwoHotProcessor
 from src.wrappers import ShareDummyVecEnv, ShareSubprocVecEnv
 
@@ -246,6 +247,10 @@ def main() -> None:
         grad_clip_norm=float(algo_config["grad_clip_norm"]),
     )
 
+    log_dir = Path(runtime_config.get("log_dir", "runs/default"))
+    logger = TensorBoardLogger(log_dir=log_dir)
+    print(f"  log_dir          : {log_dir}")
+
     runner = Runner(
         train_env=train_env,
         eval_env=eval_env,
@@ -260,11 +265,13 @@ def main() -> None:
         eval_interval=int(train_config["eval_interval"]),
         eval_episodes=int(train_config["eval_episodes"]),
         log_interval=int(train_config["log_interval"]),
+        logger=logger,
     )
 
     try:
         runner.run()
     finally:
+        logger.close()
         train_env.close()
         eval_env.close()
 
