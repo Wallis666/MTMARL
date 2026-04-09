@@ -46,6 +46,7 @@ import time
 from typing import Any
 
 import numpy as np
+from tqdm import tqdm
 
 from src.algos.trainer import WorldModelTrainer
 from src.buffers.replay_buffer import ReplayBuffer
@@ -142,7 +143,13 @@ class Runner:
         start_time = time.time()
         latest_losses: dict[str, float] = {}
 
-        for global_step in range(1, self.num_env_steps + 1):
+        progress_bar = tqdm(
+            range(1, self.num_env_steps + 1),
+            total=self.num_env_steps,
+            desc="train",
+            dynamic_ncols=True,
+        )
+        for global_step in progress_bar:
             # 1) 选动作
             if global_step <= self.warmup_steps:
                 actions = self._sample_random_actions()
@@ -193,7 +200,18 @@ class Runner:
             ):
                 latest_losses = self._do_updates()
 
-            # 6) 日志
+            # 6) 进度条 + 日志
+            recent_returns = self._completed_returns[-32:]
+            mean_return = (
+                float(np.mean(recent_returns)) if recent_returns else float("nan")
+            )
+            progress_bar.set_postfix(
+                buffer=len(self.buffer),
+                ep_ret=f"{mean_return:.2f}",
+                wm=f"{latest_losses.get('wm/total', float('nan')):.3f}",
+                cri=f"{latest_losses.get('critic/total', float('nan')):.3f}",
+                act=f"{latest_losses.get('actor/loss', float('nan')):.3f}",
+            )
             if global_step % self.log_interval == 0:
                 self._log_progress(
                     global_step=global_step,
