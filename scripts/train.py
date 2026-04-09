@@ -45,6 +45,12 @@ def _parse_arguments() -> argparse.Namespace:
         default="configs/mamujoco/train_small.yaml",
         help="YAML 配置文件路径。",
     )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="从指定的 checkpoint .pt 文件恢复 trainer 状态后再开始训练。",
+    )
     return parser.parse_args()
 
 
@@ -251,6 +257,21 @@ def main() -> None:
     logger = TensorBoardLogger(log_dir=log_dir)
     print(f"  log_dir          : {log_dir}")
 
+    # checkpoint / 视频相关配置
+    ckpt_dir = runtime_config.get("ckpt_dir")
+    video_dir = runtime_config.get("video_dir")
+    enable_video = bool(runtime_config.get("enable_video", False))
+
+    render_env_factory = None
+    if enable_video:
+        domains_for_render = env_config["domains"]
+
+        def render_env_factory() -> MultiTaskMaMuJoCo:
+            return MultiTaskMaMuJoCo(
+                domains=domains_for_render,
+                render_mode="rgb_array",
+            )
+
     runner = Runner(
         train_env=train_env,
         eval_env=eval_env,
@@ -266,7 +287,17 @@ def main() -> None:
         eval_episodes=int(train_config["eval_episodes"]),
         log_interval=int(train_config["log_interval"]),
         logger=logger,
+        ckpt_dir=ckpt_dir,
+        ckpt_interval=int(train_config.get("ckpt_interval", 50000)),
+        render_env_factory=render_env_factory,
+        video_dir=video_dir,
+        video_interval=int(train_config.get("video_interval", 50000)),
+        video_max_steps=int(train_config.get("video_max_steps", 1000)),
+        video_fps=int(train_config.get("video_fps", 30)),
     )
+
+    if args.resume is not None:
+        runner.load_checkpoint(args.resume)
 
     try:
         runner.run()

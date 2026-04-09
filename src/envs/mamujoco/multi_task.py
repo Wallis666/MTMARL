@@ -60,6 +60,7 @@ class MultiTaskMaMuJoCo:
         self,
         domains: dict[str, dict[str, Any]],
         episode_limit: int | None = None,
+        render_mode: str | None = None,
     ) -> None:
         """
         初始化总线环境。
@@ -86,6 +87,7 @@ class MultiTaskMaMuJoCo:
 
         self.domain_configs: dict[str, dict[str, Any]] = dict(domains)
         self.episode_limit = episode_limit
+        self.render_mode = render_mode
 
         # ----- 1. 为每个域创建底层环境实例 -----
         self.domain_names: list[str] = list(self.domain_configs.keys())
@@ -102,6 +104,8 @@ class MultiTaskMaMuJoCo:
                     f"域 {domain_name!r} 的配置中缺少 `tasks` 字段。"
                 )
             cfg.pop("tasks")
+            if self.render_mode is not None and "render_mode" not in cfg:
+                cfg["render_mode"] = self.render_mode
             env_cls = DOMAIN_REGISTRY[domain_name]
             self.domain_envs.append(env_cls(**cfg))
 
@@ -344,6 +348,26 @@ class MultiTaskMaMuJoCo:
         """关闭所有子环境，释放底层 MuJoCo 资源。"""
         for env in self.domain_envs:
             env.close()
+
+    def render(self) -> Any:
+        """
+        渲染当前激活任务所在的子环境。
+
+        要求构造时传入 ``render_mode``（例如 ``"rgb_array"``）。
+        返回值的具体类型由底层 MaMuJoCo / Gymnasium 决定，常见为
+        形如 ``(H, W, 3)`` 的 RGB ``np.uint8`` 数组。
+
+        异常:
+            RuntimeError: 当未指定 ``render_mode`` 时抛出。
+        """
+        if self.render_mode is None:
+            raise RuntimeError(
+                "未指定 render_mode，无法渲染。请在构造 MultiTaskMaMuJoCo "
+                "时传入 render_mode='rgb_array'。"
+            )
+        active_env = self.domain_envs[self.task_domain_index[self.current_task_index]]
+        underlying = getattr(active_env, "_env", active_env)
+        return underlying.render()
 
     # ------------------------------------------------------------------
     # 辅助查询

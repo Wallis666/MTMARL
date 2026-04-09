@@ -49,6 +49,10 @@ train:
   log_interval: 1000
   eval_interval: 10000
   eval_episodes: 5
+  ckpt_interval: 50000
+  video_interval: 50000
+  video_max_steps: 500
+  video_fps: 30
 
 algo:
   gamma: 0.99
@@ -68,3 +72,6 @@ runtime:
   device: "cuda"  # 没 GPU 时改为 "cpu"
   seed: 0
   log_dir: "runs/train_small"
+  ckpt_dir: "runs/train_small/checkpoints"
+  enable_video: true
+  video_dir: "runs/train_small/videos"

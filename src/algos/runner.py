@@ -43,14 +43,17 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 import numpy as np
+import torch
 from tqdm import tqdm
 
 from src.algos.trainer import WorldModelTrainer
 from src.buffers.replay_buffer import ReplayBuffer
 from src.utils.logger import TensorBoardLogger
+from src.utils.video_recorder import write_video
 from src.wrappers.base import ShareVecEnv
 
 
@@ -78,6 +81,13 @@ class Runner:
         eval_episodes: int = 5,
         log_interval: int = 1_000,
         logger: TensorBoardLogger | None = None,
+        ckpt_dir: str | Path | None = None,
+        ckpt_interval: int = 50_000,
+        render_env_factory: Callable[[], Any] | None = None,
+        video_dir: str | Path | None = None,
+        video_interval: int = 50_000,
+        video_max_steps: int = 1000,
+        video_fps: int = 30,
     ) -> None:
         """
         参数:
@@ -111,6 +121,19 @@ class Runner:
         self.eval_episodes = eval_episodes
         self.log_interval = log_interval
         self.logger = logger
+
+        self.ckpt_dir = Path(ckpt_dir) if ckpt_dir is not None else None
+        if self.ckpt_dir is not None:
+            self.ckpt_dir.mkdir(parents=True, exist_ok=True)
+        self.ckpt_interval = ckpt_interval
+
+        self.render_env_factory = render_env_factory
+        self.video_dir = Path(video_dir) if video_dir is not None else None
+        if self.video_dir is not None:
+            self.video_dir.mkdir(parents=True, exist_ok=True)
+        self.video_interval = video_interval
+        self.video_max_steps = video_max_steps
+        self.video_fps = video_fps
 
         self.num_envs = train_env.num_envs
         self.n_agents = train_env.n_agents
@@ -237,6 +260,27 @@ class Runner:
                 and global_step % self.eval_interval == 0
             ):
                 self.evaluate(global_step=global_step)
+
+            # 8) checkpoint
+            if (
+                self.ckpt_dir is not None
+                and self.ckpt_interval > 0
+                and global_step % self.ckpt_interval == 0
+            ):
+                self.save_checkpoint(global_step=global_step)
+
+            # 9) 视频录制
+            if (
+                self.render_env_factory is not None
+                and self.video_dir is not None
+                and self.video_interval > 0
+                and global_step % self.video_interval == 0
+            ):
+                self.record_videos(global_step=global_step)
+
+        # 训练完成时强制保存一次
+        if self.ckpt_dir is not None:
+            self.save_checkpoint(global_step=self.num_env_steps, tag="final")
 
         print("\n" + "=" * 60)
         print("训练完成")
@@ -440,3 +484,129 @@ class Runner:
                 break
 
         return float(np.mean(completed)) if completed else 0.0
+
+    # ------------------------------------------------------------------
+    # Checkpoint
+    # ------------------------------------------------------------------
+
+    def save_checkpoint(
+        self,
+        global_step: int,
+        tag: str | None = None,
+    ) -> Path:
+        """
+        把 trainer 的全部状态保存到 ``ckpt_dir``。
+
+        参数:
+            global_step: 当前训练步数，会写入文件名与 payload。
+            tag: 可选的额外标签（如 ``"final"``）；为 ``None`` 时只用步数。
+
+        返回:
+            写入完成的 ``.pt`` 文件路径。
+
+        异常:
+            RuntimeError: 当未配置 ``ckpt_dir`` 时抛出。
+        """
+        if self.ckpt_dir is None:
+            raise RuntimeError("未配置 ckpt_dir，无法保存 checkpoint。")
+        filename = f"step_{global_step:08d}.pt" if tag is None else f"{tag}.pt"
+        path = self.ckpt_dir / filename
+        payload = {
+            "global_step": global_step,
+            "trainer": self.trainer.state_dict(),
+        }
+        torch.save(payload, path)
+
+        # 同步覆盖 latest.pt，便于续训
+        latest_path = self.ckpt_dir / "latest.pt"
+        torch.save(payload, latest_path)
+        print(f"[ckpt] 已保存到 {path}")
+        return path
+
+    def load_checkpoint(
+        self,
+        path: str | Path,
+    ) -> int:
+        """
+        从 ``path`` 加载 trainer 状态并返回保存时的 ``global_step``。
+
+        参数:
+            path: ``.pt`` 文件路径，应来自 :meth:`save_checkpoint`。
+
+        返回:
+            恢复后的步数（仅供日志用，runner 主循环依然从 1 开始）。
+        """
+        payload = torch.load(path, map_location=self.trainer.device)
+        self.trainer.load_state_dict(payload["trainer"])
+        loaded_step = int(payload.get("global_step", 0))
+        print(f"[ckpt] 已加载 {path}，原 global_step={loaded_step}")
+        return loaded_step
+
+    # ------------------------------------------------------------------
+    # 视频录制
+    # ------------------------------------------------------------------
+
+    def record_videos(
+        self,
+        global_step: int,
+    ) -> dict[str, Path]:
+        """
+        对每个任务录制一段确定性策略的可视化视频。
+
+        每次会**新建**一个 ``render_mode='rgb_array'`` 的非向量化环境，
+        跑完一个任务后立刻关闭，避免对训练 / 评估环境产生干扰。
+
+        参数:
+            global_step: 当前训练步数，会写入视频文件名。
+
+        返回:
+            ``{display_name: video_path}`` 字典。
+        """
+        if self.render_env_factory is None or self.video_dir is None:
+            return {}
+
+        results: dict[str, Path] = {}
+        self.trainer.eval()
+        try:
+            render_env = self.render_env_factory()
+            display_names = list(render_env.get_task_names())
+            for task_index, display_name in enumerate(display_names):
+                frames = self._rollout_video_frames(render_env, task_index)
+                if not frames:
+                    continue
+                output_path = self.video_dir / (
+                    f"step_{global_step:08d}_{display_name}.mp4"
+                )
+                write_video(frames, output_path, fps=self.video_fps)
+                results[display_name] = output_path
+                print(
+                    f"[video] {display_name} -> {output_path} "
+                    f"({len(frames)} frames)",
+                )
+            render_env.close()
+        finally:
+            self.trainer.train()
+        return results
+
+    def _rollout_video_frames(
+        self,
+        render_env: Any,
+        task_index: int,
+    ) -> list[np.ndarray]:
+        """跑一个回合并收集每步的渲染帧（确定性策略）。"""
+        render_env.reset_task(task_index)
+        obs_list, _, _ = render_env.reset()
+        frames: list[np.ndarray] = []
+        for _ in range(self.video_max_steps):
+            frame = render_env.render()
+            if frame is not None:
+                frames.append(np.asarray(frame, dtype=np.uint8))
+
+            obs_array = np.stack(obs_list)[None, ...]  # (1, n_agents, obs_dim)
+            actions = self.trainer.select_actions(obs_array, stochastic=False)
+            actions_per_agent = list(actions[0])
+
+            obs_list, _, _, dones, _, _ = render_env.step(actions_per_agent)
+            if bool(np.any(dones)):
+                break
+        return frames
