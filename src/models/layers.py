@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -81,3 +83,47 @@ class NormedLinear(nn.Linear):
         """执行 ``Linear -> LayerNorm -> Activation`` 前向。"""
         projected = super().forward(inputs)
         return self.activation(self.layer_norm(projected))
+
+
+def build_normed_mlp(
+    in_dim: int,
+    hidden_dims: Sequence[int],
+    out_dim: int,
+    output_activation: nn.Module | None = None,
+) -> nn.Sequential:
+    """
+    构建由 ``NormedLinear`` 堆叠而成的 MLP。
+
+    隐藏层一律使用 ``NormedLinear``（即 ``Linear -> LayerNorm -> Mish``），
+    末层根据 ``output_activation`` 决定:
+
+    * 为 ``None`` 时使用普通 ``nn.Linear``（不做归一化与激活），适合
+      回归任务的输出层；
+    * 否则使用 ``NormedLinear`` 并将其作为激活，例如传入 ``SimNorm``
+      可直接得到落在单纯形上的潜在向量。
+
+    参数:
+        in_dim: 输入维度。
+        hidden_dims: 各隐藏层宽度序列；为空时整个 MLP 退化为单层输出。
+        out_dim: 输出维度。
+        output_activation: 末层激活模块；为 ``None`` 时使用普通 ``nn.Linear``。
+
+    返回:
+        包装好的 ``nn.Sequential``。
+    """
+    layers: list[nn.Module] = []
+    previous_dim = in_dim
+    for hidden_dim in hidden_dims:
+        layers.append(NormedLinear(previous_dim, hidden_dim))
+        previous_dim = hidden_dim
+    if output_activation is None:
+        layers.append(nn.Linear(previous_dim, out_dim))
+    else:
+        layers.append(
+            NormedLinear(
+                previous_dim,
+                out_dim,
+                activation=output_activation,
+            ),
+        )
+    return nn.Sequential(*layers)
