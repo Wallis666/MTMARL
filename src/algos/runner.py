@@ -161,22 +161,26 @@ class Runner:
                 infos,
                 _,
             ) = self.train_env.step(actions)
-            terminations = self._extract_terminations(infos, dones)
+            # MultiTaskMaMuJoCo 给每个智能体复制同一份团队标量奖励 / done，
+            # 这里压成 per-env 的形式喂给 buffer
+            rewards_per_env = self._reduce_per_env(rewards)
+            dones_per_env = self._reduce_per_env(dones).astype(bool)
+            terminations = self._extract_terminations(infos, dones_per_env)
 
             # 3) 写入缓冲区
             self.buffer.insert(
                 obs=obs,
                 shared_obs=shared_obs,
                 actions=actions,
-                rewards=rewards,
-                dones=dones,
+                rewards=rewards_per_env,
+                dones=dones_per_env,
                 terminations=terminations,
                 next_obs=next_obs,
                 next_shared_obs=next_shared_obs,
             )
 
             # 4) 累积回报并处理 episode 结束
-            self._track_episode_returns(rewards, dones)
+            self._track_episode_returns(rewards_per_env, dones_per_env)
 
             obs = next_obs
             shared_obs = next_shared_obs
@@ -241,6 +245,23 @@ class Runner:
     # ------------------------------------------------------------------
     # 内部辅助
     # ------------------------------------------------------------------
+
+    def _reduce_per_env(
+        self,
+        per_agent_array: np.ndarray,
+    ) -> np.ndarray:
+        """
+        把 ``(num_envs, n_agents, ...)`` 的 per-agent 数组压成
+        ``(num_envs,)`` 的 per-env 标量。
+
+        ``MultiTaskMaMuJoCo`` 给所有智能体复制同一份团队 reward / done，
+        因此直接取第 0 个智能体的值即可。
+        """
+        array = np.asarray(per_agent_array)
+        if array.ndim == 1:
+            return array
+        flat = array.reshape(self.num_envs, -1)
+        return flat[:, 0]
 
     def _sample_random_actions(self) -> np.ndarray:
         """采样形状 ``(num_envs, n_agents, action_dim)`` 的随机动作。"""
@@ -360,12 +381,10 @@ class Runner:
             actions = self.trainer.select_actions(obs, stochastic=False)
             obs, _, rewards, dones, _, _ = self.eval_env.step(actions)
 
-            rewards_flat = np.asarray(rewards, dtype=np.float32).reshape(
-                self.eval_env.num_envs,
-            )
-            dones_flat = np.asarray(dones, dtype=np.bool_).reshape(
-                self.eval_env.num_envs,
-            )
+            rewards_flat = np.asarray(rewards, dtype=np.float32)
+            rewards_flat = rewards_flat.reshape(self.eval_env.num_envs, -1)[:, 0]
+            dones_flat = np.asarray(dones, dtype=np.bool_)
+            dones_flat = dones_flat.reshape(self.eval_env.num_envs, -1)[:, 0]
             per_env_return += rewards_flat
             for env_index in range(self.eval_env.num_envs):
                 if dones_flat[env_index]:
