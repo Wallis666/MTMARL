@@ -3,11 +3,11 @@
 支持弹窗实时渲染和录制视频两种模式。
 
 用法:
-    # 弹窗渲染（默认）
+    # 弹窗渲染（默认，需要显示器）
     python -m scripts.render_baselines --algo mappo --env mamujoco \
         --model_dir baselines/runs/.../models
 
-    # 录制视频
+    # 录制视频（无头服务器也可用）
     python -m scripts.render_baselines --algo mappo --env mamujoco \
         --model_dir baselines/runs/.../models \
         --render_mode rgb_array --video_dir baselines/runs/videos
@@ -19,6 +19,12 @@
 
 import argparse
 import os
+
+# 在导入 mujoco 之前设置离屏渲染后端，
+# 使 rgb_array 模式在无头服务器上也能工作。
+# EGL 需要 GPU 驱动支持，OSMesa 为纯 CPU 软渲染备选。
+if "MUJOCO_GL" not in os.environ:
+    os.environ["MUJOCO_GL"] = "egl"
 
 import imageio
 import numpy as np
