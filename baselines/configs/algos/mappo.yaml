@@ -118,4 +118,4 @@ algo:
   fixed_order: True
 logger:
   # 日志目录
-  log_dir: "./results"
+  log_dir: "./baselines/runs"

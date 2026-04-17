@@ -113,7 +113,6 @@ def init_dir(
         env,
         task,
         algo,
-        exp_name,
         "-".join(
             ["seed-{:0>5}".format(seed), hms_time]
         ),
