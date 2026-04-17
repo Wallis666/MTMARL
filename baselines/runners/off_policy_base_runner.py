@@ -92,11 +92,11 @@ class OffPolicyBaseRunner:
                 encoding="utf-8",
             )
         setproctitle.setproctitle(
-            str(args["algo"])
+            str(env_args.get("scenario", args["env"]))
             + "-"
-            + str(args["env"])
+            + str(args["algo"])
             + "-"
-            + str(args["exp_name"])
+            + str(env_args.get("task", ""))
         )
 
         # 环境

@@ -84,11 +84,11 @@ class OnPolicyBaseRunner:
             )
         # 设置进程标题
         setproctitle.setproctitle(
-            str(args["algo"])
+            str(env_args.get("scenario", args["env"]))
             + "-"
-            + str(args["env"])
+            + str(args["algo"])
             + "-"
-            + str(args["exp_name"])
+            + str(env_args.get("task", ""))
         )
 
         # 设置环境配置
