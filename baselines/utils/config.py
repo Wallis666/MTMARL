@@ -25,10 +25,10 @@ def get_defaults_yaml_args(
         os.path.dirname(os.path.abspath(__file__))
     )[0]
     algo_cfg_path = os.path.join(
-        base_path, "configs", "algos_cfgs", f"{algo}.yaml"
+        base_path, "configs", "algos", f"{algo}.yaml"
     )
     env_cfg_path = os.path.join(
-        base_path, "configs", "envs_cfgs", f"{env}.yaml"
+        base_path, "configs", "envs", f"{env}.yaml"
     )
 
     with open(algo_cfg_path, "r", encoding="utf-8") as file:
