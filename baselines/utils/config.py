@@ -107,11 +107,13 @@ def init_dir(
     hms_time = time.strftime(
         "%Y-%m-%d-%H-%M-%S", time.localtime()
     )
+    task_name = env_args.get("task", "")
     results_path = os.path.join(
         logger_path,
         env,
         task,
         algo,
+        *([task_name] if task_name else []),
         "-".join(
             ["seed-{:0>5}".format(seed), hms_time]
         ),
