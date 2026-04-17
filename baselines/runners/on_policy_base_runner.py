@@ -1137,7 +1137,8 @@ class OnPolicyBaseRunner:
                 )
                 + "/actor_agent"
                 + str(agent_id)
-                + ".pt"
+                + ".pt",
+                map_location=self.device,
             )
             self.actor[agent_id].actor.load_state_dict(
                 policy_actor_state_dict
@@ -1150,7 +1151,8 @@ class OnPolicyBaseRunner:
                     ]
                 )
                 + "/critic_agent"
-                + ".pt"
+                + ".pt",
+                map_location=self.device,
             )
             self.critic.critic.load_state_dict(
                 policy_critic_state_dict
@@ -1164,7 +1166,8 @@ class OnPolicyBaseRunner:
                             ]
                         )
                         + "/value_normalizer"
-                        + ".pt"
+                        + ".pt",
+                        map_location=self.device,
                     )
                 )
                 self.value_normalizer.load_state_dict(

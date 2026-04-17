@@ -237,21 +237,25 @@ class TwinContinuousQCritic:
         """恢复模型参数。"""
         critic_state_dict = torch.load(
             str(model_dir) + "/critic_agent.pt",
+            map_location=self.device,
         )
         self.critic.load_state_dict(critic_state_dict)
         target_critic_state_dict = torch.load(
             str(model_dir) + "/target_critic_agent.pt",
+            map_location=self.device,
         )
         self.target_critic.load_state_dict(
             target_critic_state_dict,
         )
         critic_state_dict2 = torch.load(
             str(model_dir) + "/critic_agent2.pt",
+            map_location=self.device,
         )
         self.critic2.load_state_dict(critic_state_dict2)
         target_critic_state_dict2 = torch.load(
             str(model_dir)
             + "/target_critic_agent2.pt",
+            map_location=self.device,
         )
         self.target_critic2.load_state_dict(
             target_critic_state_dict2,

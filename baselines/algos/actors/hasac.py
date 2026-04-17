@@ -171,5 +171,6 @@ class HASAC(OffPolicyBase):
             + "/actor_agent"
             + str(id)
             + ".pt",
+            map_location=self.device,
         )
         self.actor.load_state_dict(actor_state_dict)

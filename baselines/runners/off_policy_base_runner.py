@@ -1219,7 +1219,10 @@ class OffPolicyBaseRunner:
                     + "/value_normalizer"
                     + ".pt"
                 )
-                vn_state_dict = torch.load(vn_path)
+                vn_state_dict = torch.load(
+                    vn_path,
+                    map_location=self.device,
+                )
                 self.value_normalizer.load_state_dict(
                     vn_state_dict
                 )
