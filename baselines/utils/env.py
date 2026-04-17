@@ -65,65 +65,16 @@ def make_train_env(
     env_args,
 ):
     """创建训练环境。"""
-    if env_name == "dexhands":
-        from harl.envs.dexhands.dexhands_env import (
-            DexHandsEnv,
-        )
-
-        return DexHandsEnv(
-            {"n_threads": n_threads, **env_args}
-        )
-
     def get_env_fn(rank):
         def init_env():
-            if env_name == "smac":
-                from harl.envs.smac.StarCraft2_Env import (
-                    StarCraft2Env,
+            if env_name == "mamujoco":
+                from src.envs.mamujoco.adapter import (
+                    HalfCheetahMultiTaskHARL,
                 )
 
-                env = StarCraft2Env(env_args)
-            elif env_name == "smacv2":
-                from harl.envs.smacv2.smacv2_env import (
-                    SMACv2Env,
+                env = HalfCheetahMultiTaskHARL(
+                    env_args=env_args,
                 )
-
-                env = SMACv2Env(env_args)
-            elif env_name == "mamujoco":
-                from baselines.envs.mamujoco.multiagent_mujoco.mujoco_multi import (
-                    MujocoMulti,
-                )
-
-                env = MujocoMulti(env_args=env_args)
-            elif env_name == "pettingzoo_mpe":
-                from harl.envs.pettingzoo_mpe.pettingzoo_mpe_env import (
-                    PettingZooMPEEnv,
-                )
-
-                assert env_args["scenario"] in [
-                    "simple_v2",
-                    "simple_spread_v2",
-                    "simple_reference_v2",
-                    "simple_speaker_listener_v3",
-                ], "仅支持MPE中的合作场景"
-                env = PettingZooMPEEnv(env_args)
-            elif env_name == "gym":
-                from harl.envs.gym.gym_env import (
-                    GYMEnv,
-                )
-
-                env = GYMEnv(env_args)
-            elif env_name == "football":
-                from harl.envs.football.football_env import (
-                    FootballEnv,
-                )
-
-                env = FootballEnv(env_args)
-            elif env_name == "lag":
-                from harl.envs.lag.lag_env import (
-                    LAGEnv,
-                )
-
-                env = LAGEnv(env_args)
             else:
                 print(
                     "不支持该环境: " + env_name
@@ -155,48 +106,14 @@ def make_eval_env(
 
     def get_env_fn(rank):
         def init_env():
-            if env_name == "smac":
-                from harl.envs.smac.StarCraft2_Env import (
-                    StarCraft2Env,
+            if env_name == "mamujoco":
+                from src.envs.mamujoco.adapter import (
+                    HalfCheetahMultiTaskHARL,
                 )
 
-                env = StarCraft2Env(env_args)
-            elif env_name == "smacv2":
-                from harl.envs.smacv2.smacv2_env import (
-                    SMACv2Env,
+                env = HalfCheetahMultiTaskHARL(
+                    env_args=env_args,
                 )
-
-                env = SMACv2Env(env_args)
-            elif env_name == "mamujoco":
-                from baselines.envs.mamujoco.multiagent_mujoco.mujoco_multi import (
-                    MujocoMulti,
-                )
-
-                env = MujocoMulti(env_args=env_args)
-            elif env_name == "pettingzoo_mpe":
-                from harl.envs.pettingzoo_mpe.pettingzoo_mpe_env import (
-                    PettingZooMPEEnv,
-                )
-
-                env = PettingZooMPEEnv(env_args)
-            elif env_name == "gym":
-                from harl.envs.gym.gym_env import (
-                    GYMEnv,
-                )
-
-                env = GYMEnv(env_args)
-            elif env_name == "football":
-                from harl.envs.football.football_env import (
-                    FootballEnv,
-                )
-
-                env = FootballEnv(env_args)
-            elif env_name == "lag":
-                from harl.envs.lag.lag_env import (
-                    LAGEnv,
-                )
-
-                env = LAGEnv(env_args)
             else:
                 print(
                     "不支持该环境: " + env_name
@@ -229,73 +146,14 @@ def make_render_env(
     manual_delay = True
     # 并行环境数量
     env_num = 1
-    if env_name == "smac":
-        from harl.envs.smac.StarCraft2_Env import (
-            StarCraft2Env,
+    if env_name == "mamujoco":
+        from src.envs.mamujoco.adapter import (
+            HalfCheetahMultiTaskHARL,
         )
 
-        env = StarCraft2Env(args=env_args)
-        # smac不支持手动调用render()，使用save_replay()
-        manual_render = False
-        manual_delay = False
-        env.seed(seed * 60000)
-    elif env_name == "smacv2":
-        from harl.envs.smacv2.smacv2_env import (
-            SMACv2Env,
+        env = HalfCheetahMultiTaskHARL(
+            env_args=env_args,
         )
-
-        env = SMACv2Env(args=env_args)
-        manual_render = False
-        manual_delay = False
-        env.seed(seed * 60000)
-    elif env_name == "mamujoco":
-        from baselines.envs.mamujoco.multiagent_mujoco.mujoco_multi import (
-            MujocoMulti,
-        )
-
-        env = MujocoMulti(env_args=env_args)
-        env.seed(seed * 60000)
-    elif env_name == "pettingzoo_mpe":
-        from harl.envs.pettingzoo_mpe.pettingzoo_mpe_env import (
-            PettingZooMPEEnv,
-        )
-
-        env = PettingZooMPEEnv(
-            {**env_args, "render_mode": "human"}
-        )
-        env.seed(seed * 60000)
-    elif env_name == "gym":
-        from harl.envs.gym.gym_env import GYMEnv
-
-        env = GYMEnv(env_args)
-        env.seed(seed * 60000)
-    elif env_name == "football":
-        from harl.envs.football.football_env import (
-            FootballEnv,
-        )
-
-        env = FootballEnv(env_args)
-        # football自动渲染
-        manual_render = False
-        env.seed(seed * 60000)
-    elif env_name == "dexhands":
-        from harl.envs.dexhands.dexhands_env import (
-            DexHandsEnv,
-        )
-
-        env = DexHandsEnv(
-            {"n_threads": 64, **env_args}
-        )
-        # dexhands自动渲染
-        manual_render = False
-        # dexhands使用并行环境，维度已扩展
-        manual_expand_dims = False
-        manual_delay = False
-        env_num = 64
-    elif env_name == "lag":
-        from harl.envs.lag.lag_env import LAGEnv
-
-        env = LAGEnv(env_args)
         env.seed(seed * 60000)
     else:
         print("不支持该环境: " + env_name)
@@ -327,25 +185,5 @@ def get_num_agents(
     envs,
 ):
     """获取环境中的智能体数量。"""
-    if env == "smac":
-        from harl.envs.smac.smac_maps import (
-            get_map_params,
-        )
-
-        return get_map_params(
-            env_args["map_name"]
-        )["n_agents"]
-    elif env == "smacv2":
-        return envs.n_agents
-    elif env == "mamujoco":
-        return envs.n_agents
-    elif env == "pettingzoo_mpe":
-        return envs.n_agents
-    elif env == "gym":
-        return envs.n_agents
-    elif env == "football":
-        return envs.n_agents
-    elif env == "dexhands":
-        return envs.n_agents
-    elif env == "lag":
+    if env == "mamujoco":
         return envs.n_agents
