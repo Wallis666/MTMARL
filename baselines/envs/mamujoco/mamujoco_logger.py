@@ -1,4 +1,4 @@
-"""HalfCheetah 多任务环境的 HARL Logger。"""
+"""MaMuJoCo 多任务环境的 Logger。"""
 
 from baselines.common.base_logger import BaseLogger
 

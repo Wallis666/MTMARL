@@ -76,7 +76,6 @@ class OnPolicyBaseRunner:
                 args["env"],
                 env_args,
                 args["algo"],
-                args["exp_name"],
                 algo_args["seed"]["seed"],
                 logger_path=algo_args["logger"]["log_dir"],
             )

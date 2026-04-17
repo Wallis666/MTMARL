@@ -3,7 +3,7 @@
 import json
 import os
 import time
-from uu import Error
+from json import JSONDecodeError
 
 import yaml
 
@@ -99,7 +99,6 @@ def init_dir(
     env,
     env_args,
     algo,
-    exp_name,
     seed,
     logger_path,
 ):
@@ -132,7 +131,7 @@ def is_json_serializable(value):
     try:
         json.dumps(value)
         return True
-    except Error:
+    except (TypeError, ValueError, JSONDecodeError):
         return False
 
 
@@ -148,7 +147,7 @@ def convert_json(obj):
             }
 
         elif isinstance(obj, tuple):
-            return (
+            return tuple(
                 convert_json(x) for x in obj
             )
 
