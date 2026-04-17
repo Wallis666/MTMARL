@@ -1,13 +1,15 @@
-# HalfCheetah 多任务环境（MaMuJoCo）默认配置
+# 多任务环境（MaMuJoCo）默认配置
 
+# 场景名称
+scenario: HalfCheetah
 # 智能体分割: "2x3" 即 2 个智能体各控制 3 个关节
 agent_conf: "2x3"
 # 观测深度: 0 仅局部、1 局部加一阶邻居
 agent_obsk: 1
-# 初始任务: run_fwd
+# 初始任务: run_fwd / run_bwd / stand_ffoot / stand_bfoot
 task: run_fwd
 # 单回合最大步数
 episode_limit: 1000
 # 渲染模式: null / "human" / "rgb_array"
-# 训练时保持 null；训练后回放时通过 --render_mode human 覆盖
+# 训练时保持 null；回放时通过 --render_mode human 覆盖
 render_mode: ~

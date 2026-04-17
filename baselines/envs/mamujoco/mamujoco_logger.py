@@ -16,6 +16,7 @@ class MAMuJoCoLogger(BaseLogger):
         返回:
             形如 "HalfCheetah-2x3-run_fwd" 的字符串。
         """
+        scenario = self.env_args.get("scenario", "HalfCheetah")
         agent_conf = self.env_args.get("agent_conf", "unknown")
         task = self.env_args.get("task", "run_fwd")
-        return f"HalfCheetah-{agent_conf}-{task}"
+        return f"{scenario}-{agent_conf}-{task}"

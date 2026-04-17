@@ -68,11 +68,11 @@ def make_train_env(
     def get_env_fn(rank):
         def init_env():
             if env_name == "mamujoco":
-                from src.envs.mamujoco.adapter import (
-                    HalfCheetahMultiTaskHARL,
+                from baselines.envs.mamujoco.mamujoco import (
+                    MaMuJoCoEnv,
                 )
 
-                env = HalfCheetahMultiTaskHARL(
+                env = MaMuJoCoEnv(
                     env_args=env_args,
                 )
             else:
@@ -107,11 +107,11 @@ def make_eval_env(
     def get_env_fn(rank):
         def init_env():
             if env_name == "mamujoco":
-                from src.envs.mamujoco.adapter import (
-                    HalfCheetahMultiTaskHARL,
+                from baselines.envs.mamujoco.mamujoco import (
+                    MaMuJoCoEnv,
                 )
 
-                env = HalfCheetahMultiTaskHARL(
+                env = MaMuJoCoEnv(
                     env_args=env_args,
                 )
             else:
@@ -147,11 +147,11 @@ def make_render_env(
     # 并行环境数量
     env_num = 1
     if env_name == "mamujoco":
-        from src.envs.mamujoco.adapter import (
-            HalfCheetahMultiTaskHARL,
+        from baselines.envs.mamujoco.mamujoco import (
+            MaMuJoCoEnv,
         )
 
-        env = HalfCheetahMultiTaskHARL(
+        env = MaMuJoCoEnv(
             env_args=env_args,
         )
         env.seed(seed * 60000)
