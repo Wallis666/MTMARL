@@ -40,6 +40,9 @@ _SUPPORT_FOOT_Z_BOUND: float = 0.5
 # 抬起脚的目标高度（米），达到此高度即获得满分
 _RAISED_FOOT_TARGET_Z: float = 1.0
 
+# 站立任务允许的最大水平速度（m/s），超出则 slow 奖励衰减
+_STAND_MAX_SPEED: float = 1.0
+
 
 class HalfCheetahMultiTask(MultiAgentMujocoEnv):
     """
@@ -322,9 +325,9 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         elif task == "run_bwd":
             return self._run_bwd_reward(infos)
         elif task == "stand_ffoot":
-            return self._stand_ffoot_reward()
+            return self._stand_ffoot_reward(infos)
         elif task == "stand_bfoot":
-            return self._stand_bfoot_reward()
+            return self._stand_bfoot_reward(infos)
         else:
             raise NotImplementedError(
                 f"任务 {task!r} 尚未实现"
@@ -451,17 +454,20 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
     def _stand_in_posture_reward(
         self,
         raised_foot: str,
+        infos: dict[str, dict],
     ) -> float:
         """
         单足姿态站立的奖励。
 
-        综合三个子奖励:
+        综合四个子奖励:
             - pitch: 躯干倾斜到目标角度
             - grounded: 支撑脚贴近地面
             - foot_up: 抬起脚达到目标高度
+            - slow: 水平速度接近零，鼓励静止站立
 
         参数:
             raised_foot: 需要抬起的足部名称。
+            infos: 环境 step 返回的信息字典。
 
         返回:
             [0, 1] 区间内的奖励值。
@@ -479,22 +485,44 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         pitch = self._one_foot_pitch_reward(raised_foot)
         foot_up = self._raised_foot_reward(raised_foot)
 
-        return (0.5 * pitch + 0.5 * foot_up) * grounded
+        # 鼓励静止: 速度在 ±1 m/s 内满分，超出后线性衰减至 0
+        vx = self._get_x_velocity(infos)
+        slow = tolerance(
+            vx,
+            bounds=(-_STAND_MAX_SPEED, _STAND_MAX_SPEED),
+            margin=_STAND_MAX_SPEED,
+            sigmoid="linear",
+            value_at_margin=0,
+        )
 
-    def _stand_ffoot_reward(self) -> float:
+        return (0.4 * pitch + 0.3 * foot_up + 0.3 * slow) * grounded
+
+    def _stand_ffoot_reward(
+        self,
+        infos: dict[str, dict],
+    ) -> float:
         """
         前肢着地、后肢抬高姿态站立奖励。
 
+        参数:
+            infos: 环境 step 返回的信息字典。
+
         返回:
             [0, 1] 区间内的奖励值。
         """
-        return self._stand_in_posture_reward("bfoot")
+        return self._stand_in_posture_reward("bfoot", infos)
 
-    def _stand_bfoot_reward(self) -> float:
+    def _stand_bfoot_reward(
+        self,
+        infos: dict[str, dict],
+    ) -> float:
         """
         后肢着地、前肢抬高姿态站立奖励。
 
+        参数:
+            infos: 环境 step 返回的信息字典。
+
         返回:
             [0, 1] 区间内的奖励值。
         """
-        return self._stand_in_posture_reward("ffoot")
+        return self._stand_in_posture_reward("ffoot", infos)
