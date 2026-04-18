@@ -37,6 +37,9 @@ _POSTURE_FAIL_HIGH: float = float(np.deg2rad(100))
 # 支撑脚离地高度上界（米），超过则视为离地
 _SUPPORT_FOOT_Z_BOUND: float = 0.5
 
+# 抬起脚的目标高度（米），达到此高度即获得满分
+_RAISED_FOOT_TARGET_Z: float = 1.0
+
 
 class HalfCheetahMultiTask(MultiAgentMujocoEnv):
     """
@@ -407,13 +410,36 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
             signed_pitch,
             bounds=(_PITCH_TARGET_LOW, float("inf")),
             margin=_PITCH_TARGET_LOW,
-            sigmoid="reciprocal",
         )
         upper = tolerance(
             signed_pitch,
             bounds=(-float("inf"), _PITCH_TARGET_HIGH),
         )
         return lower * upper
+
+    def _raised_foot_reward(
+        self,
+        raised_foot: str,
+    ) -> float:
+        """
+        抬起脚的高度子奖励。
+
+        鼓励 robot 将指定脚抬到目标高度，提供密集梯度信号。
+
+        参数:
+            raised_foot: 需要抬起的足部名称。
+
+        返回:
+            [0, 1] 区间内的奖励值。
+        """
+        foot_z = self._get_body_z(raised_foot)
+        return tolerance(
+            foot_z,
+            bounds=(_RAISED_FOOT_TARGET_Z, float("inf")),
+            margin=_RAISED_FOOT_TARGET_Z,
+            sigmoid="linear",
+            value_at_margin=0,
+        )
 
     def _stand_in_posture_reward(
         self,
@@ -422,7 +448,10 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         """
         单足姿态站立的奖励。
 
-        奖励姿态稳定，不要求位移。
+        综合三个子奖励:
+            - pitch: 躯干倾斜到目标角度
+            - grounded: 支撑脚贴近地面
+            - foot_up: 抬起脚达到目标高度
 
         参数:
             raised_foot: 需要抬起的足部名称。
@@ -441,8 +470,9 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         )
 
         pitch = self._one_foot_pitch_reward(raised_foot)
+        foot_up = self._raised_foot_reward(raised_foot)
 
-        return pitch * grounded
+        return (0.5 * pitch + 0.5 * foot_up) * grounded
 
     def _stand_ffoot_reward(self) -> float:
         """
