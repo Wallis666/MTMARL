@@ -446,7 +446,7 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         return tolerance(
             foot_z,
             bounds=(_RAISED_FOOT_TARGET_Z, float("inf")),
-            margin=_RAISED_FOOT_TARGET_Z,
+            margin=_RAISED_FOOT_TARGET_Z * 0.3,
             sigmoid="linear",
             value_at_margin=0,
         )
@@ -495,7 +495,7 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
             value_at_margin=0,
         )
 
-        return (0.5 * pitch + 0.5 * foot_up) * grounded * slow
+        return pitch * foot_up * grounded * slow
 
     def _stand_ffoot_reward(
         self,
