@@ -40,6 +40,9 @@ _SUPPORT_FOOT_Z_BOUND: float = 0.5
 # 抬起脚的目标高度（米），达到此高度即获得满分
 _RAISED_FOOT_TARGET_Z: float = 1.0
 
+# 脚的初始离地高度（米），用于计算抬脚奖励的 margin
+_FOOT_INITIAL_Z: float = 0.2
+
 # 站立任务允许的最大水平速度（m/s），超出则 slow 奖励衰减
 _STAND_MAX_SPEED: float = 1.0
 
@@ -446,7 +449,7 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         return tolerance(
             foot_z,
             bounds=(_RAISED_FOOT_TARGET_Z, float("inf")),
-            margin=_RAISED_FOOT_TARGET_Z * 0.3,
+            margin=_RAISED_FOOT_TARGET_Z - _FOOT_INITIAL_Z,
             sigmoid="linear",
             value_at_margin=0,
         )
@@ -490,7 +493,6 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         slow = tolerance(
             vx,
             bounds=(-_STAND_MAX_SPEED, _STAND_MAX_SPEED),
-            margin=_STAND_MAX_SPEED,
             sigmoid="linear",
             value_at_margin=0,
         )
