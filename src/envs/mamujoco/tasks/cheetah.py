@@ -51,14 +51,14 @@ class PostureConfig:
 class OneFootStandConfig:
     """单足站立任务参数。"""
 
-    # 俯仰角目标区间下界
-    pitch_low: float = float(np.deg2rad(70))
-    # 俯仰角目标区间上界
-    pitch_high: float = float(np.deg2rad(90))
+    # stand_bfoot 俯仰角目标区间（后肢着地）
+    bfoot_pitch_low: float = float(np.deg2rad(70))
+    bfoot_pitch_high: float = float(np.deg2rad(90))
+    # stand_ffoot 俯仰角目标区间（前肢着地，降低以避免 head 触地）
+    ffoot_pitch_low: float = float(np.deg2rad(40))
+    ffoot_pitch_high: float = float(np.deg2rad(60))
     # 允许的最大水平速度（m/s），超出则 slow 奖励衰减
     max_speed: float = 1.0
-    # head 最低高度（米），低于此值 stand_ffoot 奖励归零
-    head_min_z: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -530,6 +530,8 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
     def _stand_in_posture_reward(
         self,
         raised_foot: str,
+        pitch_low: float,
+        pitch_high: float,
         infos: dict[str, dict],
     ) -> float:
         """
@@ -543,6 +545,8 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
 
         参数:
             raised_foot: 需要抬起的足部名称。
+            pitch_low: 俯仰角目标区间下界（弧度）。
+            pitch_high: 俯仰角目标区间上界（弧度）。
             infos: 环境 step 返回的信息字典。
 
         返回:
@@ -561,9 +565,7 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         )
 
         pitch = self._one_foot_pitch_reward(
-            raised_foot,
-            _ONE_FOOT_STAND.pitch_low,
-            _ONE_FOOT_STAND.pitch_high,
+            raised_foot, pitch_low, pitch_high,
         )
         foot_up = self._raised_foot_reward(raised_foot)
 
@@ -588,8 +590,8 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         """
         前肢着地、后肢抬高姿态站立奖励。
 
-        在基础姿态奖励上乘以 head 高度约束因子，
-        防止 agent 利用头部撑地作弊。
+        使用较低的 pitch 目标（40°–60°），避免躯干过度
+        前倾导致 head 触地。
 
         参数:
             infos: 环境 step 返回的信息字典。
@@ -597,13 +599,11 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         返回:
             [0, 1] 区间内的奖励值。
         """
-        head_up = tolerance(
-            self._get_geom_z("head"),
-            bounds=(_ONE_FOOT_STAND.head_min_z, float("inf")),
-        )
-        return (
-            self._stand_in_posture_reward("bfoot", infos)
-            * head_up
+        return self._stand_in_posture_reward(
+            "bfoot",
+            _ONE_FOOT_STAND.ffoot_pitch_low,
+            _ONE_FOOT_STAND.ffoot_pitch_high,
+            infos,
         )
 
     def _stand_bfoot_reward(
@@ -619,7 +619,12 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         返回:
             [0, 1] 区间内的奖励值。
         """
-        return self._stand_in_posture_reward("ffoot", infos)
+        return self._stand_in_posture_reward(
+            "ffoot",
+            _ONE_FOOT_STAND.bfoot_pitch_low,
+            _ONE_FOOT_STAND.bfoot_pitch_high,
+            infos,
+        )
 
     def _run_fwd_in_posture_reward(
         self,
