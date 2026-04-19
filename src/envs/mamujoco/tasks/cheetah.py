@@ -73,6 +73,9 @@ class OneFootRunConfig:
     # run_fwd_bfoot 俯仰角目标区间（后肢着地，后仰与跑步方向相反，降低难度）
     bfoot_pitch_low: float = float(np.deg2rad(30))
     bfoot_pitch_high: float = float(np.deg2rad(50))
+    # run_fwd_bfoot 支撑脚(bfoot)离地高度上界（米），
+    # 后腿蹬地时自然抬起幅度较大，需比默认值更宽松
+    bfoot_support_z_bound: float = 0.8
     # 目标速度（m/s）
     speed: float = 4.0
 
@@ -667,9 +670,16 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
         )
         support_z = self._get_body_z(support_foot)
 
+        # raised_foot="ffoot" → 支撑脚是 bfoot，蹬地抬起幅度大，
+        # 用宽松阈值
+        support_z_bound = (
+            _ONE_FOOT_RUN.bfoot_support_z_bound
+            if raised_foot == "ffoot"
+            else _POSTURE.support_foot_z_bound
+        )
         grounded = tolerance(
             support_z,
-            bounds=(0.0, _POSTURE.support_foot_z_bound),
+            bounds=(0.0, support_z_bound),
         )
 
         pitch = self._one_foot_pitch_reward(
