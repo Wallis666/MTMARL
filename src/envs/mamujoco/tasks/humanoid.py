@@ -22,46 +22,46 @@ from src.utils.reward import tolerance
 # ------------------------------------------------------------------
 
 @dataclass(frozen=True)
+class CommonConfig:
+    """各任务共用参数。"""
+
+    # head 目标高度（米），站立时 head 应达到的高度
+    head_target_z: float = 1.4
+    # head 高度 margin（米）
+    head_z_margin: float = head_target_z / 5
+    # 动作惩罚 margin，用于 small_control 子奖励
+    control_margin: float = 1.0
+    # 躯干最小高度（米），低于此高度判定跌倒并终止 episode
+    min_torso_z: float = 1.0
+
+
+@dataclass(frozen=True)
 class RunConfig:
     """正向跑任务参数。"""
 
     # 目标速度（m/s）
     speed: float = 6.0
-    # 躯干最小高度（米），低于此高度视为跌倒
-    min_torso_z: float = 0.8
-    # 躯干最大高度（米），超出视为异常
-    max_torso_z: float = 2.0
 
 
 @dataclass(frozen=True)
 class StandConfig:
     """站立任务参数。"""
 
-    # 理想站立高度（米），指 torso 的 z 坐标
-    target_z: float = 1.4
-    # 高度容许裕量（米），用于计算 height 奖励的 margin
-    z_margin: float = 0.4
-    # 允许的最大水平速度（m/s），超出则 slow 奖励衰减
-    max_speed: float = 0.5
-    # 躯干最小高度（米），低于此高度判定跌倒并终止
-    min_torso_z: float = 0.7
+    # 水平速度 margin（m/s），
+    # gaussian 衰减，同时约束 x 和 y 两轴
+    velocity_margin: float = 1.5
 
 
 @dataclass(frozen=True)
 class WalkConfig:
     """行走任务参数。"""
 
-    # 目标速度（m/s），行走速度较低
+    # 目标速度（m/s）
     speed: float = 3.0
-    # 理想站立高度（米）
-    target_z: float = 1.3
-    # 高度容许裕量（米）
-    z_margin: float = 0.3
-    # 躯干最小高度（米），低于此高度判定跌倒
-    min_torso_z: float = 0.8
 
 
 # 全局默认配置实例
+_COMMON = CommonConfig()
 _RUN = RunConfig()
 _STAND = StandConfig()
 _WALK = WalkConfig()
@@ -86,13 +86,6 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
         "stand",
         "walk",
     ]
-
-    # 需要跌倒早期终止的任务集合
-    _FALL_TASKS: frozenset[str] = frozenset({
-        "run_fwd",
-        "stand",
-        "walk",
-    })
 
     def __init__(
         self,
@@ -206,10 +199,23 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
         # 仅在 human 渲染模式下打印，不影响训练
         if self._render_mode == "human":
             vx = self._get_x_velocity(infos)
-            torso_z = self._get_torso_z()
+            torso_z = self._get_body_z("torso")
+            head_z = self._get_geom_z("head")
+            upright = self._get_torso_upright()
+            lfoot_z = self._get_body_z("left_foot")
+            rfoot_z = self._get_body_z("right_foot")
+            pelvis_z = self._get_body_z("pelvis")
+            ctrl = self._get_control_magnitude()
             print(
-                f"\rtask={self.task:<10} v_x={vx:+6.2f}  "
-                f"torso_z={torso_z:.2f}  "
+                f"\rtask={self.task:<10} "
+                f"v_x={vx:+6.2f}  "
+                f"head={head_z:.2f}  "
+                f"torso={torso_z:.2f}  "
+                f"pelvis={pelvis_z:.2f}  "
+                f"lfoot={lfoot_z:.2f}  "
+                f"rfoot={rfoot_z:.2f}  "
+                f"upright={upright:+.2f}  "
+                f"ctrl={ctrl:.2f}  "
                 f"r={task_reward:.3f} ",
                 end="",
                 flush=True,
@@ -242,18 +248,77 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
         info = next(iter(infos.values()))
         return float(info.get("x_velocity", 0.0))
 
-    def _get_torso_z(self) -> float:
+    def _get_body_z(
+        self,
+        body_name: str,
+    ) -> float:
         """
-        获取躯干（torso）的 z 轴高度。
+        获取指定刚体的 z 轴高度。
+
+        参数:
+            body_name: 刚体名称，如 "torso"、"left_foot"。
 
         返回:
-            torso 当前的 z 坐标值。
+            该刚体当前的 z 坐标值。
         """
         return float(
             self.single_agent_env.unwrapped.data.body(
-                "torso"
+                body_name
             ).xpos[2]
         )
+
+    def _get_geom_z(
+        self,
+        geom_name: str,
+    ) -> float:
+        """
+        获取指定几何体的 z 轴高度。
+
+        参数:
+            geom_name: 几何体名称，如 "head"。
+
+        返回:
+            该几何体当前的 z 坐标值。
+        """
+        env = self.single_agent_env.unwrapped
+        geom_id = env.model.geom(geom_name).id
+        return float(env.data.geom_xpos[geom_id][2])
+
+    def _get_control(self) -> NDArray:
+        """
+        获取当前所有执行器的控制信号。
+
+        返回:
+            (n_actuators,) 的控制信号数组。
+        """
+        return self.single_agent_env.unwrapped.data.ctrl.copy()
+
+    def _get_control_magnitude(self) -> float:
+        """
+        获取当前动作信号的平均绝对值。
+
+        返回:
+            控制信号的均值幅度。
+        """
+        return float(np.mean(np.abs(self._get_control())))
+
+    def _get_xy_velocity(
+        self,
+        infos: dict[str, dict],
+    ) -> NDArray:
+        """
+        获取 x、y 两轴的速度。
+
+        参数:
+            infos: 环境 step 返回的信息字典。
+
+        返回:
+            (2,) 的速度数组 [vx, vy]。
+        """
+        info = next(iter(infos.values()))
+        vx = float(info.get("x_velocity", 0.0))
+        vy = float(info.get("y_velocity", 0.0))
+        return np.array([vx, vy])
 
     def _get_torso_upright(self) -> float:
         """
@@ -277,24 +342,16 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
         """
         判断是否已跌倒。
 
-        对 _FALL_TASKS 中的任务生效，根据各任务的
-        最低躯干高度阈值判定。
+        躯干高度低于阈值时返回 True，触发早期终止，
+        避免倒地后浪费 episode 剩余步数。
 
         返回:
             True 表示应提前终止 episode。
         """
-        task = self.task
-        if task not in self._FALL_TASKS:
-            return False
-
-        torso_z = self._get_torso_z()
-        if task == "run_fwd":
-            return torso_z < _RUN.min_torso_z
-        elif task == "stand":
-            return torso_z < _STAND.min_torso_z
-        elif task == "walk":
-            return torso_z < _WALK.min_torso_z
-        return False
+        return (
+            self._get_body_z("torso")
+            < _COMMON.min_torso_z
+        )
 
     # ------------------------------------------------------------------
     # 奖励分发
@@ -332,50 +389,35 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
     # 各任务奖励函数
     # ------------------------------------------------------------------
 
-    def _upright_reward(self) -> float:
+    def _standing_reward(self) -> float:
         """
-        躯干竖直姿态奖励。
+        站立基底子奖励（各任务共用）。
 
-        基于四元数计算的竖直程度，完全竖直时返回 1，
-        水平时返回 0。
+        综合 head 高度和躯干竖直两个信号:
+            - standing: head >= 目标高度时满分，低于时
+                gaussian 衰减
+            - upright: 躯干竖直时满分，倾斜时 linear
+                衰减至 0
 
         返回:
             [0, 1] 区间内的奖励值。
         """
-        upright = self._get_torso_upright()
-        return tolerance(
-            upright,
+        standing = tolerance(
+            self._get_geom_z("head"),
+            bounds=(
+                _COMMON.head_target_z,
+                float("inf"),
+            ),
+            margin=_COMMON.head_z_margin,
+        )
+        upright = tolerance(
+            self._get_torso_upright(),
             bounds=(0.9, float("inf")),
             margin=1.9,
             sigmoid="linear",
             value_at_margin=0,
         )
-
-    def _height_reward(
-        self,
-        target_z: float,
-        z_margin: float,
-    ) -> float:
-        """
-        躯干高度子奖励。
-
-        鼓励躯干保持在目标高度附近。
-
-        参数:
-            target_z: 目标高度（米）。
-            z_margin: 高度容许裕量（米）。
-
-        返回:
-            [0, 1] 区间内的奖励值。
-        """
-        torso_z = self._get_torso_z()
-        return tolerance(
-            torso_z,
-            bounds=(target_z, float("inf")),
-            margin=z_margin,
-            sigmoid="linear",
-            value_at_margin=0,
-        )
+        return standing * upright
 
     def _run_fwd_reward(
         self,
@@ -385,9 +427,11 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
         正向跑奖励。
 
         综合三个子奖励:
-            - speed: 沿 x 正方向达到目标速度
-            - upright: 躯干保持竖直
-            - height: 躯干高度在合理范围内
+            - standing: head 高度 × 竖直（共用基底）
+            - small_control: 动作平滑惩罚
+            - move: 沿 x 正方向达到目标速度，
+                压缩到 [1/6, 1] 保证速度不够时仍有
+                站立激励
 
         参数:
             infos: 环境 step 返回的信息字典。
@@ -396,18 +440,44 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
             [0, 1] 区间内的奖励值。
         """
         vx = self._get_x_velocity(infos)
-        speed_reward = tolerance(
+        move = tolerance(
             vx,
             bounds=(_RUN.speed, float("inf")),
             margin=_RUN.speed,
             value_at_margin=0,
             sigmoid="linear",
         )
-        height = tolerance(
-            self._get_torso_z(),
-            bounds=(_RUN.min_torso_z, _RUN.max_torso_z),
+        # 压缩到 [1/6, 1]，速度为零时仍保留站立激励
+        move = (5 * move + 1) / 6
+
+        return (
+            self._small_control_reward()
+            * self._standing_reward()
+            * move
         )
-        return speed_reward * self._upright_reward() * height
+
+    def _small_control_reward(self) -> float:
+        """
+        动作平滑子奖励。
+
+        对每个执行器的控制信号用 quadratic sigmoid 衰减，
+        取均值后压缩到 [0.8, 1.0] 区间，避免主导奖励
+        但能有效抑制高频震颤。
+
+        返回:
+            [0.8, 1.0] 区间内的奖励值。
+        """
+        ctrl = self._get_control()
+        raw = float(
+            tolerance(
+                ctrl,
+                margin=_COMMON.control_margin,
+                value_at_margin=0,
+                sigmoid="quadratic",
+            ).mean()
+        )
+        # 压缩到 [0.8, 1.0]，避免惩罚过重
+        return (4 + raw) / 5
 
     def _stand_reward(
         self,
@@ -416,10 +486,11 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
         """
         站立奖励。
 
-        综合三个子奖励:
-            - height: 躯干保持在目标站立高度
+        综合四个子奖励:
+            - standing: head 高度达到目标（gaussian 衰减）
             - upright: 躯干保持竖直
-            - slow: 水平速度接近零，鼓励静止
+            - small_control: 动作平滑惩罚，抑制震颤
+            - dont_move: xy 两轴速度接近零
 
         参数:
             infos: 环境 step 返回的信息字典。
@@ -427,22 +498,20 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
         返回:
             [0, 1] 区间内的奖励值。
         """
-        height = self._height_reward(
-            _STAND.target_z, _STAND.z_margin,
+        # xy 两轴速度约束: gaussian 衰减
+        xy_vel = self._get_xy_velocity(infos)
+        dont_move = float(
+            tolerance(
+                xy_vel,
+                margin=_STAND.velocity_margin,
+            ).mean()
         )
 
-        vx = self._get_x_velocity(infos)
-        slow = tolerance(
-            vx,
-            bounds=(
-                -_STAND.max_speed,
-                _STAND.max_speed,
-            ),
-            sigmoid="linear",
-            value_at_margin=0,
+        return (
+            self._small_control_reward()
+            * self._standing_reward()
+            * dont_move
         )
-
-        return height * self._upright_reward() * slow
 
     def _walk_reward(
         self,
@@ -452,9 +521,11 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
         行走奖励。
 
         综合三个子奖励:
-            - speed: 沿 x 正方向达到行走目标速度
-            - upright: 躯干保持竖直
-            - height: 躯干保持在合理站立高度
+            - standing: head 高度 × 竖直（共用基底）
+            - small_control: 动作平滑惩罚
+            - move: 沿 x 正方向达到行走目标速度，
+                压缩到 [1/6, 1] 保证速度不够时仍有
+                站立激励
 
         参数:
             infos: 环境 step 返回的信息字典。
@@ -463,15 +534,17 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
             [0, 1] 区间内的奖励值。
         """
         vx = self._get_x_velocity(infos)
-        speed_reward = tolerance(
+        move = tolerance(
             vx,
             bounds=(_WALK.speed, float("inf")),
             margin=_WALK.speed,
             value_at_margin=0,
             sigmoid="linear",
         )
-        height = self._height_reward(
-            _WALK.target_z, _WALK.z_margin,
-        )
+        move = (5 * move + 1) / 6
 
-        return speed_reward * self._upright_reward() * height
+        return (
+            self._small_control_reward()
+            * self._standing_reward()
+            * move
+        )
