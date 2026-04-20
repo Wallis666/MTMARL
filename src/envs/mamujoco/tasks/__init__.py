@@ -1,6 +1,7 @@
 """多任务环境注册表模块。"""
 
 from src.envs.mamujoco.tasks.cheetah import HalfCheetahMultiTask
+from src.envs.mamujoco.tasks.hopper import HopperMultiTask
 from src.envs.mamujoco.tasks.humanoid import HumanoidMultiTask
 
 
@@ -8,6 +9,7 @@ from src.envs.mamujoco.tasks.humanoid import HumanoidMultiTask
 # 新增环境时只需在此注册即可。
 ENV_REGISTRY = {
     "HalfCheetah": HalfCheetahMultiTask,
+    "Hopper": HopperMultiTask,
     "Humanoid": HumanoidMultiTask,
 }
 
@@ -16,6 +18,10 @@ ENV_REGISTRY = {
 ARGS_REGISTRY = {
     "HalfCheetah": {
         "agent_conf": "2x3",
+        "agent_obsk": 0,
+    },
+    "Hopper": {
+        "agent_conf": "3x1",
         "agent_obsk": 0,
     },
     "Humanoid": {
