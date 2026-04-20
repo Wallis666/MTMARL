@@ -95,7 +95,6 @@ class HopperMultiTask(MultiAgentMujocoEnv):
             agent_conf=agent_conf,
             agent_obsk=agent_obsk,
             render_mode=render_mode,
-            terminate_when_unhealthy=False,
             **kwargs,
         )
 
