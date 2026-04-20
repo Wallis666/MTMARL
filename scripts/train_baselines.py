@@ -78,10 +78,16 @@ def main():
 
 
 def process(arg):
-    """尝试将字符串参数转换为 Python 字面量。"""
+    """尝试将字符串参数转换为 Python 字面量。
+
+    使用 ast.literal_eval 替代 eval，仅解析数值、布尔等
+    安全字面量，避免 eval 将 "9|8" 等含运算符的字符串
+    误解析为表达式。
+    """
+    import ast
     try:
-        return eval(arg)
-    except Exception:
+        return ast.literal_eval(arg)
+    except (ValueError, SyntaxError):
         return arg
 
 

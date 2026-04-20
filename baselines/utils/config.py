@@ -74,9 +74,10 @@ def get_task_name(
     elif env == "smacv2":
         task = env_args["map_name"]
     elif env == "mamujoco":
-        task = (
-            f"{env_args['scenario']}-{env_args['agent_conf']}"
-        )
+        # 将 agent_conf 中的 "|" 替换为 "-"，
+        # 避免 Windows 路径不支持 "|" 字符
+        conf = str(env_args["agent_conf"]).replace("|", "-")
+        task = f"{env_args['scenario']}-{conf}"
     elif env == "pettingzoo_mpe":
         if env_args["continuous_actions"]:
             task = f"{env_args['scenario']}-continuous"
