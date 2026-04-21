@@ -26,7 +26,7 @@ class SwimFwdConfig:
     """正向游泳任务参数。"""
 
     # 目标速度（m/s）
-    speed: float = 2.0
+    speed: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class SwimBwdConfig:
     """反向游泳任务参数。"""
 
     # 目标速度（m/s）
-    speed: float = 1.5
+    speed: float = 0.8
 
 
 @dataclass(frozen=True)
