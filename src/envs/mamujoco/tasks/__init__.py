@@ -3,6 +3,7 @@
 from src.envs.mamujoco.tasks.cheetah import HalfCheetahMultiTask
 from src.envs.mamujoco.tasks.hopper import HopperMultiTask
 # from src.envs.mamujoco.tasks.humanoid import HumanoidMultiTask
+from src.envs.mamujoco.tasks.reacher import ReacherMultiTask
 from src.envs.mamujoco.tasks.swimmer import SwimmerMultiTask
 # from src.envs.mamujoco.tasks.walker import Walker2dMultiTask
 
@@ -15,6 +16,7 @@ ENV_REGISTRY = {
     # "Humanoid": HumanoidMultiTask,
     # "Walker2d": Walker2dMultiTask,
     "Swimmer": SwimmerMultiTask,
+    "Reacher": ReacherMultiTask,
 }
 
 # 预设智能体分割配置的默认参数。
@@ -37,6 +39,10 @@ ARGS_REGISTRY = {
         "agent_obsk": 0,
     },
     "Swimmer": {
+        "agent_conf": "2x1",
+        "agent_obsk": 0,
+    },
+    "Reacher": {
         "agent_conf": "2x1",
         "agent_obsk": 0,
     },

@@ -1,0 +1,15 @@
+# Reacher 场景配置
+
+# 场景名称
+scenario: Reacher
+# 智能体分割: "2x1" 即 2 个智能体各控制 1 个关节
+agent_conf: "2x1"
+# 观测深度: 0 仅局部、1 局部加一阶邻居
+agent_obsk: 1
+# 初始任务: reach
+task: reach
+# 单回合最大步数
+episode_limit: 1000
+# 渲染模式: null / "human" / "rgb_array"
+# 训练时保持 null；回放时通过 --render_mode human 覆盖
+render_mode: ~
