@@ -192,11 +192,15 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
             heading_deg = float(
                 np.rad2deg(self._get_heading())
             )
+            tail_deg = float(
+                np.rad2deg(self._get_tail_heading())
+            )
             print(
                 f"\rtask={self.task:<10} "
                 f"v_x={vx:+6.2f}  "
                 f"v_y={vy:+6.2f}  "
-                f"heading={heading_deg:+6.1f}°  "
+                f"head={heading_deg:+6.1f}°  "
+                f"tail={tail_deg:+6.1f}°  "
                 f"r={task_reward:.3f} ",
                 end="",
                 flush=True,
@@ -255,6 +259,19 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
             self.single_agent_env.unwrapped.data.qpos[2]
         )
 
+    def _get_tail_heading(self) -> float:
+        """
+        获取尾部（back）的绝对朝向角。
+
+        尾部朝向 = torso 朝向(qpos[2]) + motor1 关节角
+        (qpos[3]) + motor2 关节角(qpos[4])。
+
+        返回:
+            尾部绝对朝向角（弧度）。
+        """
+        qpos = self.single_agent_env.unwrapped.data.qpos
+        return float(qpos[2] + qpos[3] + qpos[4])
+
     # ------------------------------------------------------------------
     # 姿态约束子奖励
     # ------------------------------------------------------------------
@@ -288,13 +305,13 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
             sigmoid="linear",
         )
 
-    def _heading_reward(self) -> float:
+    def _head_heading_reward(self) -> float:
         """
-        朝向稳定子奖励。
+        头部朝向稳定子奖励。
 
-        惩罚躯干旋转角偏离 0（即偏离 x 轴方向），鼓励
-        身体始终朝向运动方向，避免打转或蛇形偏摆过大。
-        朝向角在 ±30° 内满分，超出后高斯衰减。
+        约束 torso 朝向角偏离 0，适用于 swim_fwd：
+        正向游时尾部摆动提供动力，头部保持稳定。
+        朝向角在 ±heading_bound 内满分，超出后高斯衰减。
 
         返回:
             [0, 1] 区间内的奖励值。
@@ -302,6 +319,26 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
         heading = self._get_heading()
         return tolerance(
             heading,
+            bounds=(
+                -_POSTURE.heading_bound,
+                _POSTURE.heading_bound,
+            ),
+        )
+
+    def _tail_heading_reward(self) -> float:
+        """
+        尾部朝向稳定子奖励。
+
+        约束 back 绝对朝向角偏离 0，适用于 swim_bwd：
+        反向游时头部摆动提供动力，尾部保持稳定。
+        朝向角在 ±heading_bound 内满分，超出后高斯衰减。
+
+        返回:
+            [0, 1] 区间内的奖励值。
+        """
+        tail_heading = self._get_tail_heading()
+        return tolerance(
+            tail_heading,
             bounds=(
                 -_POSTURE.heading_bound,
                 _POSTURE.heading_bound,
@@ -371,7 +408,7 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
         return (
             speed_reward
             * self._straight_reward(infos)
-            * self._heading_reward()
+            * self._head_heading_reward()
         )
 
     def _swim_bwd_reward(
@@ -384,7 +421,7 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
         综合三个子奖励:
             - speed: 沿 x 负方向达到目标速度
             - straight: 横向速度接近零，保持直线
-            - heading: 躯干朝向稳定，不偏摆
+            - tail_heading: 尾部朝向稳定，头部摆动提供动力
 
         参数:
             infos: 环境 step 返回的信息字典。
@@ -403,5 +440,5 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
         return (
             speed_reward
             * self._straight_reward(infos)
-            * self._heading_reward()
+            * self._tail_heading_reward()
         )
