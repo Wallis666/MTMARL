@@ -1,0 +1,15 @@
+# Walker2d 场景配置
+
+# 场景名称
+scenario: Walker2d
+# 智能体分割: "2x3" 即 2 个智能体各控制 3 个关节（左右腿）
+agent_conf: "2x3"
+# 观测深度: 0 仅局部、1 局部加一阶邻居
+agent_obsk: 0
+# 初始任务: stand
+task: stand
+# 单回合最大步数
+episode_limit: 1000
+# 渲染模式: null / "human" / "rgb_array"
+# 训练时保持 null；回放时通过 --render_mode human 覆盖
+render_mode: ~
