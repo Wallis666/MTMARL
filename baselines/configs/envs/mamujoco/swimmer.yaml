@@ -6,8 +6,8 @@ scenario: Swimmer
 agent_conf: "2x1"
 # 观测深度: 0 仅局部、1 局部加一阶邻居
 agent_obsk: 1
-# 初始任务: TODO
-task: ~
+# 初始任务: swim_fwd
+task: swim_fwd
 # 单回合最大步数
 episode_limit: 1000
 # 渲染模式: null / "human" / "rgb_array"
