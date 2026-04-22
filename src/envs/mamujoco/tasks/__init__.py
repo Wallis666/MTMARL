@@ -2,9 +2,9 @@
 
 from src.envs.mamujoco.tasks.cheetah import HalfCheetahMultiTask
 from src.envs.mamujoco.tasks.hopper import HopperMultiTask
-# from src.envs.mamujoco.tasks.humanoid import HumanoidMultiTask
+from src.envs.mamujoco.tasks.humanoid import HumanoidMultiTask
 from src.envs.mamujoco.tasks.reacher import ReacherMultiTask
-from src.envs.mamujoco.tasks.swimmer import SwimmerMultiTask
+# from src.envs.mamujoco.tasks.swimmer import SwimmerMultiTask
 # from src.envs.mamujoco.tasks.walker import Walker2dMultiTask
 
 
@@ -13,9 +13,9 @@ from src.envs.mamujoco.tasks.swimmer import SwimmerMultiTask
 ENV_REGISTRY = {
     "HalfCheetah": HalfCheetahMultiTask,
     "Hopper": HopperMultiTask,
-    # "Humanoid": HumanoidMultiTask,
+    "Humanoid": HumanoidMultiTask,
     # "Walker2d": Walker2dMultiTask,
-    "Swimmer": SwimmerMultiTask,
+    # "Swimmer": SwimmerMultiTask,
     "Reacher": ReacherMultiTask,
 }
 

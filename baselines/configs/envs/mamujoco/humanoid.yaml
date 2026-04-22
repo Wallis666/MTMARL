@@ -6,8 +6,8 @@ scenario: Humanoid
 agent_conf: "9|8"
 # 观测深度: 0 仅局部、1 局部加一阶邻居
 agent_obsk: 0
-# 初始任务: run_fwd
-task: run_fwd
+# 初始任务: stand
+task: stand
 # 单回合最大步数
 episode_limit: 1000
 # 渲染模式: null / "human" / "rgb_array"
