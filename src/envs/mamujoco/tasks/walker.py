@@ -29,7 +29,7 @@ class CommonConfig:
     # 站立时躯干的最小目标高度（米）
     stand_height: float = 1.0
     # 站立时躯干的最大目标高度（米）
-    stand_height_upper: float = 2.0
+    stand_height_upper: float = 1.5
     # 直立角度容许上界（±弧度），
     # 在此范围内视为直立
     upright_angle_bound: float = float(np.deg2rad(15))
@@ -310,7 +310,7 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
         """
         躯干高度奖励。
 
-        躯干高度在目标范围 [1.0, 2.0] 米内时返回 1，
+        躯干高度在目标范围 [1.0, 1.5] 米内时返回 1，
         低于下界时以 gaussian 方式衰减。
 
         返回:
