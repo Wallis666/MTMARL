@@ -1,0 +1,15 @@
+# HumanoidStandup 场景配置
+
+# 场景名称
+scenario: HumanoidStandup
+# 智能体分割: "9|8" 即上半身 9 个关节、下半身 8 个关节
+agent_conf: "9|8"
+# 观测深度: 0 仅局部、1 局部加一阶邻居
+agent_obsk: 1
+# 初始任务: standup
+task: standup
+# 单回合最大步数
+episode_limit: 1000
+# 渲染模式: null / "human" / "rgb_array"
+# 训练时保持 null；回放时通过 --render_mode human 覆盖
+render_mode: ~
