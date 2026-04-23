@@ -249,8 +249,8 @@ class HumanoidMultiTask(MultiAgentMujocoEnv):
             print(
                 f"\rtask={self.task:<6} "
                 f"v_x={vx:+6.2f}  "
-                f"head_z={head_z:.2f}  "
-                f"torso_z={torso_z:.2f}  "
+                f"head={head_z:.2f}  "
+                f"torso={torso_z:.2f}  "
                 f"upright={upright:.2f}  "
                 f"r={task_reward:.3f} ",
                 end="",

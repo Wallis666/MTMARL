@@ -25,8 +25,7 @@ from src.utils.reward import tolerance
 class StandupConfig:
     """站起任务参数。"""
 
-    # 目标站立高度（米），即 torso z 坐标的期望值
-    # reward_linup × dt = qpos[2]，故此值直接对应 torso z
+    # 目标站立高度（米），即 torso z 坐标（qpos[2]）的期望值
     standup_height: float = 1.5
 
 
@@ -84,10 +83,6 @@ class HumanoidStandupMultiTask(MultiAgentMujocoEnv):
 
         self._render_mode = render_mode
         self._task_idx: int = 0
-        # 仿真时间步长，用于将 reward_linup 换算为高度
-        self._dt: float = float(
-            self.single_agent_env.unwrapped.model.opt.timestep
-        )
 
     # ------------------------------------------------------------------
     # 任务属性
@@ -165,14 +160,14 @@ class HumanoidStandupMultiTask(MultiAgentMujocoEnv):
             (观测, 奖励, 终止, 截断, 信息) 五元组。
         """
         obs, _, terms, truncs, infos = super().step(actions)
-        task_reward = self._compute_reward(infos)
+        task_reward = self._compute_reward()
         rewards = {agent: task_reward for agent in obs}
         # 仅在 human 渲染模式下打印，不影响训练
         if self._render_mode == "human":
-            torso_z = self._get_torso_z(infos)
+            torso_z = self._get_torso_z()
             print(
                 f"\rtask={self.task:<8} "
-                f"torso_z={torso_z:.2f}  "
+                f"torso={torso_z:.2f}  "
                 f"r={task_reward:.3f} ",
                 end="",
                 flush=True,
@@ -184,38 +179,29 @@ class HumanoidStandupMultiTask(MultiAgentMujocoEnv):
     # 内部工具方法
     # ------------------------------------------------------------------
 
-    def _get_torso_z(
-        self,
-        infos: dict[str, dict],
-    ) -> float:
+    @property
+    def _mj_data(self):
+        """返回底层 MuJoCo 仿真的 data 对象。"""
+        return self.single_agent_env.unwrapped.data
+
+    def _get_torso_z(self) -> float:
         """
-        从信息字典中获取 torso 的 z 坐标高度。
+        获取 torso 的 z 坐标高度。
 
-        利用 info 中的 reward_linup（= qpos[2] / dt），
-        乘以 dt 即可还原 torso z 坐标。
-
-        参数:
-            infos: 环境 step 返回的信息字典。
+        直接读取 qpos[2]（torso 自由关节的世界 z 坐标）。
 
         返回:
             torso 的 z 坐标值（米）。
         """
-        info = next(iter(infos.values()))
-        return float(info["reward_linup"]) * self._dt
+        return float(self._mj_data.qpos[2])
 
     # ------------------------------------------------------------------
     # 奖励分发
     # ------------------------------------------------------------------
 
-    def _compute_reward(
-        self,
-        infos: dict[str, dict],
-    ) -> float:
+    def _compute_reward(self) -> float:
         """
         根据当前任务计算奖励。
-
-        参数:
-            infos: 环境 step 返回的信息字典。
 
         返回:
             当前任务对应的标量奖励值。
@@ -225,7 +211,7 @@ class HumanoidStandupMultiTask(MultiAgentMujocoEnv):
         """
         task = self.task
         if task == "standup":
-            return self._standup_reward(infos)
+            return self._standup_reward()
         else:
             raise NotImplementedError(
                 f"任务 {task!r} 尚未实现"
@@ -235,24 +221,18 @@ class HumanoidStandupMultiTask(MultiAgentMujocoEnv):
     # 各任务奖励函数
     # ------------------------------------------------------------------
 
-    def _standup_reward(
-        self,
-        infos: dict[str, dict],
-    ) -> float:
+    def _standup_reward(self) -> float:
         """
         站起任务奖励。
 
-        将 reward_linup × dt 还原为 torso z 高度，当高度
+        直接读取 qpos[2] 获取 torso z 高度，当高度
         ≥ standup_height 时满分，低于此值按 margin 线性
         衰减至 0。
-
-        参数:
-            infos: 环境 step 返回的信息字典。
 
         返回:
             [0, 1] 区间内的奖励值。
         """
-        torso_z = self._get_torso_z(infos)
+        torso_z = self._get_torso_z()
         return tolerance(
             torso_z,
             bounds=(
