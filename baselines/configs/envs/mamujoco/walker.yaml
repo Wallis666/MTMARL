@@ -13,9 +13,3 @@ episode_limit: 1000
 # 渲染模式: null / "human" / "rgb_array"
 # 训练时保持 null；回放时通过 --render_mode human 覆盖
 render_mode: ~
-
-# 算法参数覆盖: Walker2d 左右腿对称，
-# 参数共享会导致双腿同步（蹦而非走），需关闭
-algo_overrides:
-  algo:
-    share_param: False
