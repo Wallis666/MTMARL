@@ -2,8 +2,8 @@
 Walker2d 多任务多智能体环境模块。
 
 基于 gymnasium_robotics MaMuJoCo 的 MultiAgentMujocoEnv 派生，
-提供 stand、walk、run 三种任务的自定义奖励函数，
-支持在任务间动态切换。
+提供 stand、walk_fwd、walk_bwd、run_fwd、run_bwd 五种任务的
+自定义奖励函数，支持在任务间动态切换。
 """
 
 from dataclasses import dataclass
@@ -23,54 +23,93 @@ from src.utils.reward import tolerance
 # ------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class CommonConfig:
-    """各任务共用参数。"""
+class PostureConfig:
+    """姿态奖励参数。"""
 
-    # 站立时躯干的最小目标高度（米）
+    # 站立时 torso 相对于最低足部的目标高度下界（米）
+    # Walker2d 初始 torso z ≈ 1.25，foot z ≈ 0，高度差 ≈ 1.25
     stand_height: float = 1.0
-    # 站立时躯干的最大目标高度（米）
-    stand_height_upper: float = 1.5
-    # 直立角度容许上界（±弧度），
-    # 在此范围内视为直立
-    upright_angle_bound: float = float(np.deg2rad(15))
-    # 健康角度下界（弧度），超出后终止 episode
-    healthy_angle_low: float = float(np.deg2rad(-30))
-    # 健康角度上界（弧度），超出后终止 episode
-    healthy_angle_high: float = float(np.deg2rad(30))
+    # 站立高度上界（米）
+    stand_height_upper: float = 2.0
+    # 高度奖励 margin（米）
+    height_margin: float = 0.4
+    # 直立角度下界（弧度），rooty 在此范围内视为直立
+    # ±15° ≈ ±0.26 rad
+    upright_bound: float = float(np.deg2rad(15))
+    # 直立角度 margin（弧度）
+    upright_margin: float = float(np.deg2rad(30))
+    # 摔倒判定: torso 高度下界（米）
+    fall_height: float = 0.5
+    # 摔倒判定: 俯仰角绝对值上界（弧度）
+    # 60° ≈ 1.05 rad
+    fall_pitch: float = float(np.deg2rad(60))
+
+
+@dataclass(frozen=True)
+class GaitConfig:
+    """步态协调参数。"""
+
+    # 双腿相位差奖励: 大腿关节速度符号相反时满分
+    # 相位奖励的 margin 参数
+    phase_margin: float = 1.0
+    # 足部高度差异上界（米），双脚交替抬起的目标
+    foot_diff_margin: float = 0.1
+    # 步态协调奖励的权重（相对于总奖励）
+    gait_weight: float = 0.1
+
+
+@dataclass(frozen=True)
+class EnergyConfig:
+    """能量惩罚参数。"""
+
+    # 控制量惩罚 margin
+    control_margin: float = 1.0
+    # 能量奖励权重
+    energy_weight: float = 0.1
 
 
 @dataclass(frozen=True)
 class StandConfig:
     """站立任务参数。"""
 
-    # 动作惩罚 margin
-    control_margin: float = 1.0
+    # 静止速度 margin（m/s），速度越小奖励越高
+    speed_margin: float = 0.5
+    # 双脚 x 方向间距目标下界（米）
+    foot_gap_lower: float = 0.15
+    # 双脚 x 方向间距目标上界（米）
+    foot_gap_upper: float = 0.3
+    # 间距 margin（米）
+    foot_gap_margin: float = 0.15
 
 
 @dataclass(frozen=True)
 class WalkConfig:
     """行走任务参数。"""
 
-    # 目标行走速度（m/s）
-    speed: float = 1.0
-    # 接触力归一化阈值（N），用于判定脚是否着地
-    contact_threshold: float = 1.0
-    # 双脚使用率滑动窗口长度（步）
-    foot_usage_window: int = 40
-    # 双脚使用率的最小均衡比例，低于此值时开始惩罚
-    foot_usage_min_ratio: float = 0.3
+    # 前进目标速度（m/s）
+    fwd_speed: float = 1.0
+    # 后退目标速度（m/s），用绝对值表示
+    bwd_speed: float = 1.0
+    # 速度 margin
+    speed_margin: float = 1.0
 
 
 @dataclass(frozen=True)
 class RunConfig:
     """奔跑任务参数。"""
 
-    # 目标奔跑速度（m/s）
-    speed: float = 5.0
+    # 前进目标速度（m/s）
+    fwd_speed: float = 4.0
+    # 后退目标速度（m/s），用绝对值表示
+    bwd_speed: float = 4.0
+    # 速度 margin
+    speed_margin: float = 3.0
 
 
 # 全局默认配置实例
-_COMMON = CommonConfig()
+_POSTURE = PostureConfig()
+_GAIT = GaitConfig()
+_ENERGY = EnergyConfig()
 _STAND = StandConfig()
 _WALK = WalkConfig()
 _RUN = RunConfig()
@@ -84,20 +123,28 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
     并在 step 中用当前任务的自定义奖励替换默认奖励。
     各智能体在同一时间步共享相同的任务奖励信号。
 
-    Walker2d 是一个二维平面的双足机器人，由 torso、左右大腿、
-    小腿和脚组成，共 6 个受控关节。智能体分为两组（2x3），
-    分别控制左右腿的三个关节。
-
     支持的任务集:
-        - stand: 站立保持平衡
-        - walk: 向前稳定行走
-        - run: 向前快速奔跑
+        - stand: 站立保持平衡（速度接近零）
+        - walk_fwd: 向前行走（目标速度 1.0 m/s）
+        - walk_bwd: 向后行走（目标速度 -1.0 m/s）
+        - run_fwd: 向前奔跑（目标速度 4.0 m/s）
+        - run_bwd: 向后奔跑（目标速度 -4.0 m/s）
+
+    奖励设计要点:
+        1. 姿态奖励作为乘性基础项，确保机器人始终
+           优先维持站立平衡
+        2. 步态协调奖励鼓励双腿交替运动，避免双腿
+           同步导致的蹦跳步态
+        3. 能量奖励惩罚过大的控制信号，促进平滑动作
+        4. 速度奖励根据任务类型追踪不同的目标速度
     """
 
     TASKS: list[str] = [
         "stand",
-        "walk",
-        "run",
+        "walk_fwd",
+        "walk_bwd",
+        "run_fwd",
+        "run_bwd",
     ]
 
     def __init__(
@@ -112,7 +159,7 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
 
         参数:
             agent_conf: 智能体分割配置，如 "2x3" 表示
-                2 个智能体各控制 3 个关节。
+                2 个智能体各控制 3 个关节（左右腿）。
             agent_obsk: 观测深度，0 为仅局部，1 为局部加
                 一阶邻居。
             render_mode: 渲染模式，如 "human" 或
@@ -130,36 +177,6 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
 
         self._render_mode = render_mode
         self._task_idx: int = 0
-        # 上一步的动作，用于计算动作平滑奖励
-        self._prev_actions: NDArray | None = None
-        # 左右脚接触历史，用于计算双脚使用率
-        self._right_contact_history: list[bool] = []
-        self._left_contact_history: list[bool] = []
-
-    # ------------------------------------------------------------------
-    # 重写 reset：清空历史状态
-    # ------------------------------------------------------------------
-
-    def reset(
-        self,
-        *args: Any,
-        **kwargs: Any,
-    ) -> tuple[dict[str, NDArray], dict[str, dict]]:
-        """
-        重置环境并清空步态追踪历史。
-
-        参数:
-            *args: 传递给父类 reset 的位置参数。
-            **kwargs: 传递给父类 reset 的关键字参数。
-
-        返回:
-            (观测, 信息) 二元组。
-        """
-        obs, info = super().reset(*args, **kwargs)
-        self._prev_actions = None
-        self._right_contact_history.clear()
-        self._left_contact_history.clear()
-        return obs, info
 
     # ------------------------------------------------------------------
     # 任务属性
@@ -236,52 +253,35 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
         返回:
             (观测, 奖励, 终止, 截断, 信息) 五元组。
         """
-        # 记录当前动作用于平滑奖励
-        current_ctrl = \
-            self.single_agent_env.unwrapped.data.ctrl.copy()
-
         obs, _, terms, truncs, infos = super().step(actions)
-
-        # 更新接触历史
-        r_frc, l_frc = self._get_foot_contact_forces()
-        self._right_contact_history.append(
-            r_frc > _WALK.contact_threshold
-        )
-        self._left_contact_history.append(
-            l_frc > _WALK.contact_threshold
-        )
-        # 保持窗口长度
-        window = _WALK.foot_usage_window
-        if len(self._right_contact_history) > window:
-            self._right_contact_history.pop(0)
-            self._left_contact_history.pop(0)
-
         task_reward = self._compute_reward(infos)
         rewards = {agent: task_reward for agent in obs}
-
-        # 更新上一步动作
-        self._prev_actions = current_ctrl
-
         # 仅在 human 渲染模式下打印，不影响训练
         if self._render_mode == "human":
             vx = self._get_x_velocity(infos)
-            height = self._get_torso_height()
-            angle_deg = float(
-                np.rad2deg(self._get_torso_angle())
+            height = self._get_height()
+            pitch_deg = float(
+                np.rad2deg(self._get_torso_pitch())
             )
             ctrl = self._get_control_magnitude()
+            gait = self._gait_phase_reward()
+            foot_gap = self._get_foot_gap()
             print(
                 f"\rtask={self.task:<10} "
                 f"v_x={vx:+6.2f}  "
                 f"height={height:.2f}  "
-                f"angle={angle_deg:+6.1f}°  "
+                f"pitch={pitch_deg:+6.1f}°  "
                 f"ctrl={ctrl:.2f}  "
-                f"r_frc={r_frc:.0f}  "
-                f"l_frc={l_frc:.0f}  "
+                f"gait={gait:.2f}  "
+                f"gap={foot_gap:.3f}  "
                 f"r={task_reward:.3f} ",
                 end="",
                 flush=True,
             )
+
+        # 摔倒时提前终止 episode
+        if self._has_fallen():
+            terms = {agent: True for agent in terms}
 
         return obs, rewards, terms, truncs, infos
 
@@ -302,37 +302,8 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
         返回:
             x 方向线速度。
         """
-        # 所有智能体共享同一底层环境，取任意一个即可
         info = next(iter(infos.values()))
         return float(info.get("x_velocity", 0.0))
-
-    def _get_torso_height(self) -> float:
-        """
-        获取 torso 的绝对高度（qpos[1]）。
-
-        Walker2d 的 qpos[1] 对应 rootz 关节，
-        即躯干质心的 z 坐标。
-
-        返回:
-            躯干高度（米）。
-        """
-        return float(
-            self.single_agent_env.unwrapped.data.qpos[1]
-        )
-
-    def _get_torso_angle(self) -> float:
-        """
-        获取躯干俯仰角（qpos[2]，rooty 关节）。
-
-        Walker2d 中 rooty 关节控制躯干绕 y 轴的旋转，
-        0 表示竖直站立，正值表示前倾，负值表示后倾。
-
-        返回:
-            躯干俯仰角（弧度）。
-        """
-        return float(
-            self.single_agent_env.unwrapped.data.qpos[2]
-        )
 
     def _get_body_z(
         self,
@@ -353,6 +324,36 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             ).xpos[2]
         )
 
+    def _get_height(self) -> float:
+        """
+        获取 torso 相对于最低足部的高度差。
+
+        取左右脚中较低的一只作为参考，避免单脚
+        抬起时高度计算失真。
+
+        返回:
+            torso 与最低足部的 z 坐标差值（米）。
+        """
+        foot_z = min(
+            self._get_body_z("foot"),
+            self._get_body_z("foot_left"),
+        )
+        return self._get_body_z("torso") - foot_z
+
+    def _get_torso_pitch(self) -> float:
+        """
+        获取躯干俯仰角（rooty 关节位置）。
+
+        Walker2d 中 rooty 位于 qpos[2]，正值表示前倾，
+        负值表示后仰。
+
+        返回:
+            躯干俯仰角（弧度）。
+        """
+        return float(
+            self.single_agent_env.unwrapped.data.qpos[2]
+        )
+
     def _get_control_magnitude(self) -> float:
         """
         获取当前动作信号的平均绝对值。
@@ -363,195 +364,177 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
         ctrl = self.single_agent_env.unwrapped.data.ctrl
         return float(np.mean(np.abs(ctrl)))
 
-    def _get_foot_contact_forces(self) -> tuple[float, float]:
+    def _get_thigh_velocities(self) -> tuple[float, float]:
         """
-        获取左右脚的地面接触法向力。
+        获取左右大腿关节的角速度。
 
-        遍历 MuJoCo 的接触点列表，累加每只脚与地面之间
-        的法向力分量。
+        Walker2d qvel 布局:
+            [0]=rootx, [1]=rootz, [2]=rooty,
+            [3]=thigh_joint, [4]=leg_joint, [5]=foot_joint,
+            [6]=thigh_left_joint, [7]=leg_left_joint,
+            [8]=foot_left_joint
 
         返回:
-            (右脚接触力, 左脚接触力) 元组，单位为牛顿。
+            (右大腿角速度, 左大腿角速度) 元组。
         """
-        env = self.single_agent_env.unwrapped
-        data = env.data
-        model = env.model
-        right_foot_id = model.geom("foot_geom").id
-        left_foot_id = model.geom("foot_left_geom").id
-        floor_id = model.geom("floor").id
+        qvel = self.single_agent_env.unwrapped.data.qvel
+        return float(qvel[3]), float(qvel[6])
 
-        right_force = 0.0
-        left_force = 0.0
-        for i in range(data.ncon):
-            contact = data.contact[i]
-            geom1 = contact.geom1
-            geom2 = contact.geom2
-            # 提取法向力分量
-            if contact.efc_address < 0:
-                continue
-            normal_force = abs(float(
-                data.efc_force[contact.efc_address]
-            ))
-            if {geom1, geom2} == {floor_id, right_foot_id}:
-                right_force += normal_force
-            elif {geom1, geom2} == {floor_id, left_foot_id}:
-                left_force += normal_force
-
-        return right_force, left_force
-
-    def _get_foot_velocities(self) -> tuple[float, float]:
+    def _get_foot_heights(self) -> tuple[float, float]:
         """
-        获取左右脚在 x-z 平面上的速度大小。
-
-        通过 MuJoCo 的刚体速度接口获取脚部质心速度，
-        取 x 和 z 分量的范数作为脚的运动速度。
+        获取左右脚的 z 轴高度。
 
         返回:
-            (右脚速度, 左脚速度) 元组，单位为 m/s。
+            (右脚高度, 左脚高度) 元组。
         """
-        env = self.single_agent_env.unwrapped
-        # body 的线速度存储在 cvel 中（6D: 3 旋转 + 3 平移）
-        # 使用 subtree_linvel 获取线速度
-        r_vel = env.data.body("foot").subtree_linvel
-        l_vel = env.data.body("foot_left").subtree_linvel
-        # 取 x(0) 和 z(2) 分量的范数
-        r_speed = float(np.sqrt(r_vel[0]**2 + r_vel[2]**2))
-        l_speed = float(np.sqrt(l_vel[0]**2 + l_vel[2]**2))
-        return r_speed, l_speed
-
-    # ------------------------------------------------------------------
-    # 奖励子函数
-    # ------------------------------------------------------------------
-
-    def _height_reward(self) -> float:
-        """
-        躯干高度奖励。
-
-        躯干高度在目标范围 [1.0, 1.5] 米内时返回 1，
-        低于下界时以 gaussian 方式衰减。
-
-        返回:
-            [0, 1] 区间内的奖励值。
-        """
-        return tolerance(
-            self._get_torso_height(),
-            bounds=(
-                _COMMON.stand_height,
-                _COMMON.stand_height_upper,
-            ),
+        return (
+            self._get_body_z("foot"),
+            self._get_body_z("foot_left"),
         )
 
-    def _upright_reward(self) -> float:
+    def _get_foot_gap(self) -> float:
         """
-        躯干直立姿态奖励。
-
-        俯仰角在 ±15° 以内时返回 1，超出后以 gaussian
-        方式衰减。margin 设为上界值，使衰减更平滑。
+        获取左右脚在 x 方向的绝对间距。
 
         返回:
-            [0, 1] 区间内的奖励值。
+            双脚 x 坐标差的绝对值（米）。
         """
-        return tolerance(
-            self._get_torso_angle(),
-            bounds=(
-                -_COMMON.upright_angle_bound,
-                _COMMON.upright_angle_bound,
-            ),
-            margin=_COMMON.upright_angle_bound,
+        data = self.single_agent_env.unwrapped.data
+        foot_r_x = float(data.body("foot").xpos[0])
+        foot_l_x = float(
+            data.body("foot_left").xpos[0]
         )
+        return abs(foot_r_x - foot_l_x)
 
-    def _contact_alternation_reward(self) -> float:
+    # ------------------------------------------------------------------
+    # 早期终止
+    # ------------------------------------------------------------------
+
+    def _has_fallen(self) -> bool:
         """
-        接触交替奖励。
+        判断是否应提前终止 episode。
 
-        参考 LearningHumanoidWalking 中 calc_foot_frc_clock_reward
-        的思路: 正常行走时，每个时刻应该有一只脚在地面（支撑相）、
-        另一只脚在空中（摆动相），两只脚的接触力应呈反相关系。
+        满足以下任一条件时终止:
+            - 状态包含 NaN 或 Inf
+            - torso 高度差 < fall_height
+            - 俯仰角绝对值 > fall_pitch
 
-        具体实现:
-            - 着地的脚应有较大接触力，同时速度较低（支撑）
-            - 抬起的脚应无接触力，同时速度较高（摆动）
-            - 用力与速度的交叉乘积来度量交替程度
+        返回:
+            True 表示应提前终止。
+        """
+        qpos = self.single_agent_env.unwrapped.data.qpos
+        qvel = self.single_agent_env.unwrapped.data.qvel
+        # NaN / Inf 检测
+        if (
+            np.any(np.isnan(qpos))
+            or np.any(np.isinf(qpos))
+            or np.any(np.isnan(qvel))
+            or np.any(np.isinf(qvel))
+        ):
+            return True
+        # 高度过低
+        if self._get_height() < _POSTURE.fall_height:
+            return True
+        # 俯仰角过大
+        if abs(self._get_torso_pitch()) > _POSTURE.fall_pitch:
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # 子奖励：姿态
+    # ------------------------------------------------------------------
+
+    def _posture_reward(self) -> float:
+        """
+        姿态子奖励。
+
+        综合两个因子:
+            - standing: torso 保持在目标高度范围内
+            - upright: 俯仰角保持在直立范围内
+
+        两者相乘，确保机器人必须同时满足高度和直立
+        要求才能获得高奖励。
 
         返回:
             [0, 1] 区间内的奖励值。
         """
-        r_frc, l_frc = self._get_foot_contact_forces()
-        r_vel, l_vel = self._get_foot_velocities()
-
-        # 归一化接触力: 机器人质量约 3.5kg，
-        # 单脚最大承力约 3.5*9.8 ≈ 34N
-        max_frc = 40.0
-        r_frc_norm = min(r_frc / max_frc, 1.0)
-        l_frc_norm = min(l_frc / max_frc, 1.0)
-
-        # 归一化脚部速度
-        max_vel = 2.0
-        r_vel_norm = min(r_vel / max_vel, 1.0)
-        l_vel_norm = min(l_vel / max_vel, 1.0)
-
-        # 交叉得分: 右脚着地（高力低速）+ 左脚摆动（低力高速），
-        # 或者反过来。两种情况取较大值。
-        score_r_stance = r_frc_norm * l_vel_norm
-        score_l_stance = l_frc_norm * r_vel_norm
-        return max(score_r_stance, score_l_stance)
-
-    def _foot_usage_reward(self) -> float:
-        """
-        双脚使用率奖励。
-
-        追踪滑动窗口内两只脚的接触次数，奖励两脚均匀
-        交替使用。如果一只脚长期不接触地面（被拖着走），
-        使用率比值会很低，奖励接近零。
-
-        这是解决"单腿拖行"问题的核心奖励: 即使瞬时交替
-        得分不错，但长期只用一只脚仍会被惩罚。
-
-        返回:
-            [0, 1] 区间内的奖励值。
-        """
-        # 窗口不够长时不惩罚，给予充分的探索时间
-        window = _WALK.foot_usage_window
-        if len(self._right_contact_history) < window // 2:
-            return 1.0
-
-        r_count = sum(self._right_contact_history)
-        l_count = sum(self._left_contact_history)
-        total = r_count + l_count
-
-        if total == 0:
-            # 两只脚都没接触地面（腾空），不惩罚
-            return 1.0
-
-        # 使用率比值: 两脚各自占总接触的比例，
-        # 取较小值。完美交替时 ratio=0.5，单脚时 ratio=0
-        ratio = min(r_count, l_count) / total
-
-        return tolerance(
-            ratio,
-            bounds=(_WALK.foot_usage_min_ratio, 1.0),
-            margin=_WALK.foot_usage_min_ratio,
-            value_at_margin=0,
+        # 高度奖励: 在目标范围内满分，低于时衰减
+        standing = tolerance(
+            self._get_height(),
+            bounds=(
+                _POSTURE.stand_height,
+                _POSTURE.stand_height_upper,
+            ),
+            margin=_POSTURE.height_margin,
+        )
+        # 直立奖励: 俯仰角在 ±15° 内满分
+        pitch = abs(self._get_torso_pitch())
+        upright = tolerance(
+            pitch,
+            bounds=(0.0, _POSTURE.upright_bound),
+            margin=_POSTURE.upright_margin,
             sigmoid="linear",
         )
+        return standing * upright
 
-    def _action_smoothness_reward(self) -> float:
+    # ------------------------------------------------------------------
+    # 子奖励：步态协调
+    # ------------------------------------------------------------------
+
+    def _gait_phase_reward(self) -> float:
         """
-        动作平滑奖励。
+        步态协调子奖励。
 
-        参考 LearningHumanoidWalking 中 calc_action_reward:
-        惩罚相邻时间步之间动作的突变，使步态更自然连贯，
-        减少关节抖动和不协调的急停急转。
+        通过检测左右大腿关节角速度的反相关程度来
+        奖励交替步态。当两腿角速度符号相反且幅度
+        相当时，表明双腿在做交替摆动（行走步态）。
+
+        计算方式:
+            phase_diff = -v_right × v_left
+            当 phase_diff > 0（符号相反）时给予奖励。
 
         返回:
             [0, 1] 区间内的奖励值。
         """
-        if self._prev_actions is None:
-            return 1.0
+        v_right, v_left = self._get_thigh_velocities()
+        # 负积 > 0 表示交替运动
+        phase_product = -v_right * v_left
+        return float(
+            tolerance(
+                phase_product,
+                bounds=(0.0, float("inf")),
+                margin=_GAIT.phase_margin,
+                sigmoid="linear",
+                value_at_margin=0.1,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 子奖励：能量
+    # ------------------------------------------------------------------
+
+    def _energy_reward(self) -> float:
+        """
+        能量子奖励。
+
+        惩罚过大的控制信号，鼓励平滑动作。
+        使用 tolerance 对控制量均值进行 quadratic 衰减，
+        然后映射到 [0.8, 1.0] 范围，避免过度惩罚。
+
+        返回:
+            [0.8, 1.0] 区间内的奖励值。
+        """
         ctrl = self.single_agent_env.unwrapped.data.ctrl
-        diff = np.abs(ctrl - self._prev_actions)
-        penalty = 5.0 * np.mean(diff)
-        return float(np.exp(-penalty))
+        small_control = float(
+            tolerance(
+                ctrl,
+                margin=_ENERGY.control_margin,
+                value_at_margin=0,
+                sigmoid="quadratic",
+            ).mean()
+        )
+        # 映射到 [0.8, 1.0]
+        return (4 + small_control) / 5
 
     # ------------------------------------------------------------------
     # 奖励分发
@@ -575,11 +558,15 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
         """
         task = self.task
         if task == "stand":
-            return self._stand_reward()
-        elif task == "walk":
-            return self._walk_reward(infos)
-        elif task == "run":
-            return self._run_reward(infos)
+            return self._stand_reward(infos)
+        elif task == "walk_fwd":
+            return self._walk_reward(infos, forward=True)
+        elif task == "walk_bwd":
+            return self._walk_reward(infos, forward=False)
+        elif task == "run_fwd":
+            return self._run_reward(infos, forward=True)
+        elif task == "run_bwd":
+            return self._run_reward(infos, forward=False)
         else:
             raise NotImplementedError(
                 f"任务 {task!r} 尚未实现"
@@ -589,115 +576,151 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
     # 各任务奖励函数
     # ------------------------------------------------------------------
 
-    def _stand_reward(self) -> float:
+    def _stand_reward(
+        self,
+        infos: dict[str, dict],
+    ) -> float:
         """
-        站立奖励。
+        站立任务奖励。
 
-        综合三个子奖励:
-            - height: 躯干高度保持在目标范围内
-            - upright: 躯干保持直立姿态
-            - small_control: 动作平滑惩罚，鼓励最小化
-                不必要的关节运动
+        保持姿态直立、速度接近零、控制量小，
+        且双脚保持适当间距（不重叠）。
+        总奖励 = 姿态 × 速度 × 能量 × 脚间距。
+
+        站立任务不加入步态协调奖励，因为站立时
+        双腿应保持静止而非交替运动。
+
+        参数:
+            infos: 环境 step 返回的信息字典。
 
         返回:
             [0, 1] 区间内的奖励值。
         """
-        height = self._height_reward()
-        upright = self._upright_reward()
-
-        ctrl = self.single_agent_env.unwrapped.data.ctrl
-        small_control = float(
-            tolerance(
-                ctrl,
-                margin=_STAND.control_margin,
-                value_at_margin=0,
-                sigmoid="quadratic",
-            ).mean()
+        # 速度接近零时满分
+        vx = self._get_x_velocity(infos)
+        speed_reward = tolerance(
+            vx,
+            bounds=(0.0, 0.0),
+            margin=_STAND.speed_margin,
+            value_at_margin=0.01,
         )
-        # 压缩至 [0.8, 1.0]，避免控制惩罚主导奖励
-        small_control = (4 + small_control) / 5
-
-        return height * upright * small_control
+        # 双脚间距在目标范围内时满分
+        foot_gap_reward = tolerance(
+            self._get_foot_gap(),
+            bounds=(
+                _STAND.foot_gap_lower,
+                _STAND.foot_gap_upper,
+            ),
+            margin=_STAND.foot_gap_margin,
+        )
+        return (
+            self._posture_reward()
+            * speed_reward
+            * self._energy_reward()
+            * foot_gap_reward
+        )
 
     def _walk_reward(
         self,
         infos: dict[str, dict],
+        forward: bool,
     ) -> float:
         """
-        行走奖励。
+        行走任务奖励。
 
-        四项加权求和，每项独立提供梯度信号:
-            - posture (权重 0.15): height × upright，
-                站稳即可获得
-            - speed (权重 0.45): gaussian 衰减的速度跟踪，
-                vx=0 时仍有 ~0.04 的非零值
-            - gait (权重 0.25): alternation × foot_usage，
-                交替步态质量
-            - smooth (权重 0.15): 动作平滑度
+        保持姿态直立，沿指定方向达到目标步行速度，
+        并鼓励交替步态。
 
-        使用加法而非乘法: 各项独立贡献梯度，不会因
-        某一项为零导致整体梯度消失。
+        奖励构成:
+            主项 = 姿态 × 速度 × 能量
+            步态 = 步态协调奖励
+            总奖励 = 主项 × (1 - gait_weight)
+                     + 主项 × 步态 × gait_weight
 
-        速度使用 gaussian sigmoid（参考 rewards.py 中
-        calc_fwd_vel_reward 的 exp(-10·e²) 设计）:
-        vx=0 时 speed≈0.04，vx=0.5 时 speed≈0.29，
-        始终有非零梯度推动智能体加速。
+        步态奖励以加权形式加入，而非直接相乘，
+        避免训练初期因步态不协调导致奖励过低、
+        阻碍策略探索。
 
         参数:
             infos: 环境 step 返回的信息字典。
+            forward: True 表示前进，False 表示后退。
 
         返回:
             [0, 1] 区间内的奖励值。
         """
         vx = self._get_x_velocity(infos)
-        # gaussian sigmoid: vx=0 → ~0.04, vx=0.5 → ~0.29,
-        # vx=1.0 → 1.0，始终有梯度
-        speed = tolerance(
-            vx,
-            bounds=(_WALK.speed, float("inf")),
-            margin=_WALK.speed,
-            sigmoid="gaussian",
+        if forward:
+            speed_reward = tolerance(
+                vx,
+                bounds=(
+                    _WALK.fwd_speed, _WALK.fwd_speed,
+                ),
+                margin=_WALK.speed_margin,
+                sigmoid="linear",
+            )
+        else:
+            speed_reward = tolerance(
+                -vx,
+                bounds=(
+                    _WALK.bwd_speed, _WALK.bwd_speed,
+                ),
+                margin=_WALK.speed_margin,
+                sigmoid="linear",
+            )
+        main = (
+            self._posture_reward()
+            * speed_reward
+            * self._energy_reward()
         )
-        height = self._height_reward()
-        upright = self._upright_reward()
-        alternation = self._contact_alternation_reward()
-        foot_usage = self._foot_usage_reward()
-        smooth = self._action_smoothness_reward()
-
-        posture = height * upright
-        gait = alternation * foot_usage
-
-        return (
-            0.15 * posture
-            + 0.45 * speed
-            + 0.25 * gait
-            + 0.15 * smooth
-        )
+        gait = self._gait_phase_reward()
+        w = _GAIT.gait_weight
+        return main * (1 - w) + main * gait * w
 
     def _run_reward(
         self,
         infos: dict[str, dict],
+        forward: bool,
     ) -> float:
         """
-        奔跑奖励。
+        奔跑任务奖励。
 
-        与 walk 结构类似，但不强加步态约束。
+        保持姿态直立，沿指定方向达到目标奔跑速度。
+        速度达到目标值即满分，更快不扣分。
+
+        奖励构成与行走类似，但步态协调的权重略低，
+        因为高速奔跑时可能出现飞行相（双脚同时
+        离地），此时步态相位检测不完全适用。
 
         参数:
             infos: 环境 step 返回的信息字典。
+            forward: True 表示前进，False 表示后退。
 
         返回:
             [0, 1] 区间内的奖励值。
         """
         vx = self._get_x_velocity(infos)
-        speed = tolerance(
-            vx,
-            bounds=(_RUN.speed, float("inf")),
-            margin=_RUN.speed,
-            sigmoid="gaussian",
+        if forward:
+            speed_reward = tolerance(
+                vx,
+                bounds=(_RUN.fwd_speed, float("inf")),
+                margin=_RUN.speed_margin,
+                value_at_margin=0,
+                sigmoid="linear",
+            )
+        else:
+            speed_reward = tolerance(
+                -vx,
+                bounds=(_RUN.bwd_speed, float("inf")),
+                margin=_RUN.speed_margin,
+                value_at_margin=0,
+                sigmoid="linear",
+            )
+        main = (
+            self._posture_reward()
+            * speed_reward
+            * self._energy_reward()
         )
-        height = self._height_reward()
-        upright = self._upright_reward()
-
-        posture = height * upright
-        return 0.2 * posture + 0.8 * speed
+        gait = self._gait_phase_reward()
+        # 奔跑时步态权重减半，允许飞行相
+        w = _GAIT.gait_weight / 2
+        return main * (1 - w) + main * gait * w
