@@ -238,7 +238,8 @@ class HalfCheetahMultiTask(MultiAgentMujocoEnv):
             bfoot_z = self._get_body_z("bfoot")
             ffoot_z = self._get_body_z("ffoot")
             print(
-                f"\rtask={self.task:<15} v_x={vx:+6.2f}  "
+                f"\rtask={self.task:<15} "
+                f"v_x={vx:+6.2f} "
                 f"pitch={pitch_deg:+6.1f}°  "
                 f"torso={torso_z:.2f}  "
                 f"bfoot={bfoot_z:.2f}  "

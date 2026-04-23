@@ -426,8 +426,8 @@ class HopperMultiTask(MultiAgentMujocoEnv):
 
         vx = self._get_x_velocity(infos)
         hopping = tolerance(
-            -vx,
-            bounds=(_HOP.speed, float("inf")),
+            vx,
+            bounds=(-float("inf"), -_HOP.speed),
             margin=_HOP.speed / 2,
             value_at_margin=0.5,
             sigmoid="linear",
