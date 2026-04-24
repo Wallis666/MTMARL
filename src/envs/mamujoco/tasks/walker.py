@@ -28,6 +28,12 @@ class StandConfig:
 
     # torso 最低站立高度（米）
     height: float = 1.2
+    # 目标速度上限（m/s），越接近 0 越好
+    max_speed: float = 0.5
+    # 两腿夹角下限（度）
+    leg_angle_low: float = 30.0
+    # 两腿夹角上限（度）
+    leg_angle_high: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -194,11 +200,13 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             vx = self._get_x_velocity(infos)
             height = self._get_torso_height()
             upright = self._get_torso_upright()
+            leg_ang = self._get_leg_angle()
             print(
                 f"\rtask={self.task:<10} "
                 f"v_x={vx:+6.2f}  "
                 f"height={height:.2f}  "
                 f"upright={upright:+.2f}  "
+                f"leg_ang={leg_ang:5.1f}°  "
                 f"r={task_reward:.3f} ",
                 end="",
                 flush=True,
@@ -255,6 +263,19 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             .body("torso").xmat
         )
         return float(xmat[8])
+
+    def _get_leg_angle(self) -> float:
+        """
+        获取左右大腿关节角度之差的绝对值（度）。
+
+        thigh_joint (qpos[3]) 与 thigh_left_joint (qpos[6])
+        的差值取绝对值后转为角度。
+
+        返回:
+            两腿夹角（度）。
+        """
+        qpos = self.single_agent_env.unwrapped.data.qpos
+        return float(np.degrees(abs(qpos[3] - qpos[6])))
 
     # ------------------------------------------------------------------
     # 奖励分发
@@ -322,10 +343,49 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
         """
         站立任务奖励。
 
+        综合四个因子:
+            - standing: torso 高度 ≥ 阈值时满分
+            - upright: 躯干直立度映射到 [0, 1]
+            - small_velocity: x 速度接近 0 时满分
+            - leg_angle: 两腿夹角在目标区间内时满分
+        合并公式: standing × upright × (small_velocity + leg_angle) / 2
+
         返回:
             [0, 1] 区间内的奖励值。
         """
-        return self._stand_reward_components()
+        standing = tolerance(
+            self._get_torso_height(),
+            bounds=(_STAND.height, float("inf")),
+            margin=_STAND.height / 2,
+        )
+        upright = (1 + self._get_torso_upright()) / 2
+
+        # 速度越接近 0 越好
+        x_vel = float(
+            self.single_agent_env.unwrapped.data.qvel[0]
+        )
+        small_velocity = tolerance(
+            x_vel,
+            bounds=(-_STAND.max_speed, _STAND.max_speed),
+            margin=_STAND.max_speed,
+        )
+
+        # 两腿夹角在目标区间内
+        leg_angle = self._get_leg_angle()
+        leg_angle_reward = tolerance(
+            leg_angle,
+            bounds=(
+                _STAND.leg_angle_low,
+                _STAND.leg_angle_high,
+            ),
+            margin=15.0,
+        )
+
+        return (
+            standing
+            * upright
+            * (small_velocity + leg_angle_reward) / 2
+        )
 
     def _walk_reward(
         self,
