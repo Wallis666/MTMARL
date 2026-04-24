@@ -5,7 +5,6 @@ Swimmer 多任务多智能体环境模块。
 提供多种游泳任务的自定义奖励函数，支持在任务间动态切换。
 """
 
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -13,44 +12,6 @@ from gymnasium_robotics.envs.multiagent_mujoco.mujoco_multi import (
     MultiAgentMujocoEnv,
 )
 from numpy.typing import NDArray
-
-from src.utils.reward import tolerance
-
-
-# ------------------------------------------------------------------
-# 任务参数配置
-# ------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class SwimFwdConfig:
-    """正向游泳任务参数。"""
-
-    # 目标速度（m/s）
-    speed: float = 1.0
-
-
-@dataclass(frozen=True)
-class SwimBwdConfig:
-    """反向游泳任务参数。"""
-
-    # 目标速度（m/s）
-    speed: float = 0.8
-
-
-@dataclass(frozen=True)
-class PostureConfig:
-    """游泳姿态约束参数。"""
-
-    # 允许的最大横向速度（m/s），超出后 straight 奖励衰减
-    max_lateral_speed: float = 0.5
-    # 躯干朝向角容许范围（±弧度），在此范围内视为方向正确
-    heading_bound: float = float(np.deg2rad(30))
-
-
-# 全局默认配置实例
-_SWIM_FWD = SwimFwdConfig()
-_SWIM_BWD = SwimBwdConfig()
-_POSTURE = PostureConfig()
 
 
 # ------------------------------------------------------------------
@@ -65,6 +26,12 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
     继承 MultiAgentMujocoEnv，固定 scenario 为 Swimmer，
     并在 step 中用当前任务的自定义奖励替换默认奖励。
     各智能体在同一时间步共享相同的任务奖励信号。
+
+    奖励基于归一化相位正弦值 sin(φ)：
+        - swim_fwd: 奖励 sin(φ) → +1（φ → +π/2，
+            joint1 领先，正向行波）
+        - swim_bwd: 奖励 sin(φ) → -1（φ → -π/2，
+            joint2 领先，反向行波）
 
     支持的任务集:
         - swim_fwd: 正向游泳
@@ -96,10 +63,15 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
             **kwargs: 传递给 MultiAgentMujocoEnv 的额外
                 参数。
         """
+        # 默认 local_categories 对邻居只共享 qpos，
+        # 这里覆盖为所有深度都共享 qpos+qvel，
+        # 使每个 agent 能观测到对方关节的角速度。
+        local_cat = [["qpos", "qvel"]] * (agent_obsk + 1)
         super().__init__(
             scenario="Swimmer",
             agent_conf=agent_conf,
             agent_obsk=agent_obsk,
+            local_categories=local_cat,
             render_mode=render_mode,
             **kwargs,
         )
@@ -183,24 +155,14 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
             (观测, 奖励, 终止, 截断, 信息) 五元组。
         """
         obs, _, terms, truncs, infos = super().step(actions)
-        task_reward = self._compute_reward(infos)
+        task_reward = self._compute_reward()
         rewards = {agent: task_reward for agent in obs}
         # 仅在 human 渲染模式下打印，不影响训练
         if self._render_mode == "human":
-            vx = self._get_x_velocity(infos)
-            vy = self._get_y_velocity(infos)
-            heading_deg = float(
-                np.rad2deg(self._get_heading())
-            )
-            tail_deg = float(
-                np.rad2deg(self._get_tail_heading())
-            )
+            sin_phi = self._sin_phase()
             print(
                 f"\rtask={self.task:<10} "
-                f"v_x={vx:+6.2f}  "
-                f"v_y={vy:+6.2f}  "
-                f"head={heading_deg:+6.1f}°  "
-                f"tail={tail_deg:+6.1f}°  "
+                f"sin(φ)={sin_phi:+.4f}  "
                 f"r={task_reward:.3f} ",
                 end="",
                 flush=True,
@@ -212,152 +174,51 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
     # 内部工具方法
     # ------------------------------------------------------------------
 
-    def _get_x_velocity(
-        self,
-        infos: dict[str, dict],
-    ) -> float:
+    def _sin_phase(self) -> float:
         """
-        从信息字典中提取 x 方向速度。
+        估计 joint1 相对于 joint2 的相位差正弦值。
 
-        参数:
-            infos: 环境 step 返回的信息字典。
+        利用归一化交叉积消除振幅和频率的影响：
+
+            sin(φ) ≈ (q1·dq2 - q2·dq1)
+                      / sqrt((q1² + q2²)(dq1² + dq2²))
+
+        当两关节振幅相近（A1 ≈ A2）时，此估计在稳态下
+        精确等于 sin(φ)：
+            - φ = +π/2 → +1（joint1 领先，正向行波）
+            - φ = -π/2 → -1（joint2 领先，反向行波）
+            - φ = 0 或 π →  0（无行波）
 
         返回:
-            x 方向线速度。
+            [-1, 1] 区间内的标量。关节静止时返回 0。
         """
-        # 所有智能体共享同一底层环境，取任意一个即可
-        info = next(iter(infos.values()))
-        return float(info.get("x_velocity", 0.0))
+        data = self.single_agent_env.unwrapped.data
+        q1 = data.qpos[3]   # motor1_rot 关节角
+        q2 = data.qpos[4]   # motor2_rot 关节角
+        dq1 = data.qvel[3]  # motor1_rot 角速度
+        dq2 = data.qvel[4]  # motor2_rot 角速度
 
-    def _get_y_velocity(
-        self,
-        infos: dict[str, dict],
-    ) -> float:
-        """
-        从信息字典中提取 y 方向速度。
-
-        参数:
-            infos: 环境 step 返回的信息字典。
-
-        返回:
-            y 方向线速度。
-        """
-        info = next(iter(infos.values()))
-        return float(info.get("y_velocity", 0.0))
-
-    def _get_heading(self) -> float:
-        """
-        获取躯干朝向角（free_body_rot 关节位置）。
-
-        Swimmer 在 x-y 平面运动，qpos[2] 为绕 z 轴的
-        旋转角（弧度），0 表示朝向 x 正方向。
-
-        返回:
-            躯干朝向角（弧度）。
-        """
-        return float(
-            self.single_agent_env.unwrapped.data.qpos[2]
+        cross = q1 * dq2 - q2 * dq1
+        denom = np.sqrt(
+            (q1 ** 2 + q2 ** 2)
+            * (dq1 ** 2 + dq2 ** 2)
         )
-
-    def _get_tail_heading(self) -> float:
-        """
-        获取尾部（back）的绝对朝向角。
-
-        尾部朝向 = torso 朝向(qpos[2]) + motor1 关节角
-        (qpos[3]) + motor2 关节角(qpos[4])。
-
-        返回:
-            尾部绝对朝向角（弧度）。
-        """
-        qpos = self.single_agent_env.unwrapped.data.qpos
-        return float(qpos[2] + qpos[3] + qpos[4])
-
-    # ------------------------------------------------------------------
-    # 姿态约束子奖励
-    # ------------------------------------------------------------------
-
-    def _straight_reward(
-        self,
-        infos: dict[str, dict],
-    ) -> float:
-        """
-        直线游泳子奖励。
-
-        惩罚横向速度，鼓励沿 x 轴直线运动，避免偏航漂移。
-        y 方向速度在 ±max_lateral_speed 内满分，超出后
-        线性衰减至 0。
-
-        参数:
-            infos: 环境 step 返回的信息字典。
-
-        返回:
-            [0, 1] 区间内的奖励值。
-        """
-        vy = self._get_y_velocity(infos)
-        return tolerance(
-            vy,
-            bounds=(
-                -_POSTURE.max_lateral_speed,
-                _POSTURE.max_lateral_speed,
-            ),
-            margin=_POSTURE.max_lateral_speed,
-            value_at_margin=0,
-            sigmoid="linear",
-        )
-
-    def _head_heading_reward(self) -> float:
-        """
-        头部朝向稳定子奖励。
-
-        约束 torso 朝向角偏离 0，适用于 swim_fwd：
-        正向游时尾部摆动提供动力，头部保持稳定。
-        朝向角在 ±heading_bound 内满分，超出后高斯衰减。
-
-        返回:
-            [0, 1] 区间内的奖励值。
-        """
-        heading = self._get_heading()
-        return tolerance(
-            heading,
-            bounds=(
-                -_POSTURE.heading_bound,
-                _POSTURE.heading_bound,
-            ),
-        )
-
-    def _tail_heading_reward(self) -> float:
-        """
-        尾部朝向稳定子奖励。
-
-        约束 back 绝对朝向角偏离 0，适用于 swim_bwd：
-        反向游时头部摆动提供动力，尾部保持稳定。
-        朝向角在 ±heading_bound 内满分，超出后高斯衰减。
-
-        返回:
-            [0, 1] 区间内的奖励值。
-        """
-        tail_heading = self._get_tail_heading()
-        return tolerance(
-            tail_heading,
-            bounds=(
-                -_POSTURE.heading_bound,
-                _POSTURE.heading_bound,
-            ),
-        )
+        if denom < 1e-8:
+            return 0.0
+        return float(np.clip(cross / denom, -1.0, 1.0))
 
     # ------------------------------------------------------------------
     # 奖励分发
     # ------------------------------------------------------------------
 
-    def _compute_reward(
-        self,
-        infos: dict[str, dict],
-    ) -> float:
+    def _compute_reward(self) -> float:
         """
         根据当前任务计算奖励。
 
-        参数:
-            infos: 环境 step 返回的信息字典。
+        奖励 = max(±sin(φ), 0)，直接度量相位差接近
+        ±π/2 的程度：
+            - swim_fwd: 奖励 sin(φ) → +1（φ → +π/2）
+            - swim_bwd: 奖励 sin(φ) → -1（φ → -π/2）
 
         返回:
             当前任务对应的标量奖励值。
@@ -365,11 +226,12 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
         异常:
             NotImplementedError: 当前任务未实现时抛出。
         """
+        sin_phi = self._sin_phase()
         task = self.task
         if task == "swim_fwd":
-            return self._swim_fwd_reward(infos)
+            return self._swim_fwd_reward(sin_phi)
         elif task == "swim_bwd":
-            return self._swim_bwd_reward(infos)
+            return self._swim_bwd_reward(sin_phi)
         else:
             raise NotImplementedError(
                 f"任务 {task!r} 尚未实现"
@@ -381,64 +243,36 @@ class SwimmerMultiTask(MultiAgentMujocoEnv):
 
     def _swim_fwd_reward(
         self,
-        infos: dict[str, dict],
+        sin_phi: float,
     ) -> float:
         """
         正向游泳奖励。
 
-        综合三个子奖励:
-            - speed: 沿 x 正方向达到目标速度
-            - straight: 横向速度接近零，保持直线
-            - heading: 躯干朝向稳定，不偏摆
+        奖励归一化相位正弦值的正部，鼓励 joint1 领先
+        joint2 达到 π/2 相位差，形成正向行波。
 
         参数:
-            infos: 环境 step 返回的信息字典。
+            sin_phi: 归一化相位正弦值。
 
         返回:
             [0, 1] 区间内的奖励值。
         """
-        speed = self._get_x_velocity(infos)
-        speed_reward = tolerance(
-            speed,
-            bounds=(_SWIM_FWD.speed, float("inf")),
-            margin=_SWIM_FWD.speed,
-            value_at_margin=0,
-            sigmoid="linear",
-        )
-        return (
-            speed_reward
-            * self._straight_reward(infos)
-            * self._head_heading_reward()
-        )
+        return float(max(sin_phi, 0.0))
 
     def _swim_bwd_reward(
         self,
-        infos: dict[str, dict],
+        sin_phi: float,
     ) -> float:
         """
         反向游泳奖励。
 
-        综合两个子奖励:
-            - speed: 沿 x 负方向达到目标速度
-            - straight: 横向速度接近零，保持直线
-
-        不约束朝向角：tail heading 包含两个执行器的关节角，
-        约束它会直接压制关节运动；head heading 在反向游时
-        振幅较大，约束它会阻碍反向行波的形成。
-        仅通过 straight（y 方向速度）保证直线性。
+        奖励归一化相位正弦值的负部，鼓励 joint2 领先
+        joint1 达到 π/2 相位差，形成反向行波。
 
         参数:
-            infos: 环境 step 返回的信息字典。
+            sin_phi: 归一化相位正弦值。
 
         返回:
             [0, 1] 区间内的奖励值。
         """
-        speed = self._get_x_velocity(infos)
-        speed_reward = tolerance(
-            speed,
-            bounds=(-float("inf"), -_SWIM_BWD.speed),
-            margin=_SWIM_BWD.speed,
-            value_at_margin=0,
-            sigmoid="linear",
-        )
-        return speed_reward * self._straight_reward(infos)
+        return float(max(-sin_phi, 0.0))
