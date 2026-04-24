@@ -346,7 +346,7 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
                 _STAND.leg_angle_low,
                 _STAND.leg_angle_high,
             ),
-            margin=15.0,
+            margin=_STAND.leg_angle_low,
         )
 
         return (
