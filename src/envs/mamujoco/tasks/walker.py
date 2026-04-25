@@ -41,11 +41,13 @@ class WalkConfig:
     """行走任务参数。"""
 
     # torso 高度合理区间下限（米）
-    height_low: float = 1.0
+    height_low: float = 1.1
     # torso 高度合理区间上限（米）
     height_high: float = 1.4
     # 高度 tolerance 的 margin
-    height_margin: float = 0.3
+    height_margin: float = 0.2
+    # 早期终止高度阈值（米），低于此值视为倒下
+    terminate_height: float = 1.0
     # 目标前进速度（m/s），正值向前，负值向后
     target_speed: float = 1.0
     # 前进速度 tolerance 的 margin
@@ -226,6 +228,11 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
                 end="",
                 flush=True,
             )
+
+        # 早期终止：walk/run 任务中 torso 高度低于阈值视为倒下
+        if self.task in ("walk_fwd", "walk_bwd", "run_fwd", "run_bwd"):
+            if self._get_torso_height() < _WALK.terminate_height:
+                terms = {agent: True for agent in terms}
 
         return obs, rewards, terms, truncs, infos
 
