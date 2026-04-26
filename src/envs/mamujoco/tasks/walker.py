@@ -65,13 +65,13 @@ class RunConfig:
     """奔跑任务参数。"""
 
     # torso 高度合理区间下限（米）
-    height_low: float = 1.0
+    height_low: float = 0.9
     # torso 高度合理区间上限（米）
     height_high: float = 1.5
     # 高度 tolerance 的 margin
-    height_margin: float = 0.3
+    height_margin: float = 0.2
     # 早期终止高度阈值（米），低于此值视为倒下
-    terminate_height: float = 0.9
+    terminate_height: float = 0.8
     # 目标前进速度（m/s），正值向前，负值向后
     target_speed: float = 5.0
     # 前进速度 tolerance 的 margin
@@ -420,7 +420,7 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             bounds=(_STAND.height, float("inf")),
             margin=_STAND.height / 2,
         )
-        upright = (1 + 5 * self._get_torso_upright()) / 6
+        upright = (1 + self._get_torso_upright()) / 2
 
         # 速度越接近 0 越好
         vx = self._get_x_velocity(infos)
