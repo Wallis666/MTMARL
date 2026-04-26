@@ -481,7 +481,7 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             * smooth_z
             * grounded
         )
-
+    # TODO
     def _walk_bwd_reward(
         self,
         infos: dict[str, dict],
@@ -619,7 +619,7 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             * smooth_z
             * grounded
         )
-
+    # TODO
     def _run_bwd_reward(
         self,
         infos: dict[str, dict],
