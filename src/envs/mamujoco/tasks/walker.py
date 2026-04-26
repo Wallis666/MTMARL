@@ -398,7 +398,7 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             bounds=(_STAND.height, float("inf")),
             margin=_STAND.height / 2,
         )
-        upright = (1 + self._get_torso_upright()) / 2
+        upright = (1 + 5 * self._get_torso_upright()) / 6
 
         # 速度越接近 0 越好
         vx = self._get_x_velocity(infos)
@@ -447,7 +447,7 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
         )
 
         # 躯干直立
-        upright = (1 + self._get_torso_upright()) / 2
+        upright = (1 + 5 * self._get_torso_upright()) / 6
 
         # 水平速度达到目标（正方向）
         vx = self._get_x_velocity(infos)
@@ -516,7 +516,7 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
         )
 
         # 躯干直立
-        upright = (1 + self._get_torso_upright()) / 2
+        upright = (1 + 5 * self._get_torso_upright()) / 6
 
         # 水平速度达到目标（负方向）
         vx = self._get_x_velocity(infos)
