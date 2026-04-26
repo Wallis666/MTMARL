@@ -61,13 +61,15 @@ class RunConfig:
     """奔跑任务参数。"""
 
     # torso 高度合理区间下限（米）
-    height_low: float = 0.9
+    height_low: float = 1.0
     # torso 高度合理区间上限（米）
-    height_high: float = 1.5
+    height_high: float = 1.4
     # 高度 tolerance 的 margin
     height_margin: float = 0.2
     # 早期终止高度阈值（米），低于此值视为倒下
     terminate_height: float = 0.8
+    # 早期终止角度阈值（弧度），躯干倾斜超过此值视为倒下
+    terminate_angle: float = 0.8
     # 目标前进速度（m/s），正值向前，负值向后
     target_speed: float = 5.0
     # 前进速度 tolerance 的 margin
@@ -238,12 +240,13 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
                 flush=True,
             )
 
-        # 早期终止：walk/run 任务中 torso 高度低于阈值视为倒下
+        # 早期终止：walk/run 任务中 torso 高度或角度超限视为倒下
         if self.task in ("walk_fwd", "walk_bwd"):
             if self._get_torso_height() < _WALK.terminate_height:
                 terms = {agent: True for agent in terms}
         if self.task in ("run_fwd", "run_bwd"):
-            if self._get_torso_height() < _RUN.terminate_height:
+            if (self._get_torso_height() < _RUN.terminate_height
+                    or abs(self._get_torso_angle()) > _RUN.terminate_angle):
                 terms = {agent: True for agent in terms}
 
         return obs, rewards, terms, truncs, infos
@@ -297,6 +300,17 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             .body("torso").xmat
         )
         return float(xmat[8])
+
+    def _get_torso_angle(self) -> float:
+        """
+        获取躯干俯仰角（rooty 关节位置）。
+
+        返回:
+            躯干俯仰角（弧度）。
+        """
+        return float(
+            self.single_agent_env.unwrapped.data.qpos[2]
+        )
 
     def _get_z_velocity(self) -> float:
         """
