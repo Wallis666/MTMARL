@@ -64,6 +64,25 @@ class WalkConfig:
 class RunConfig:
     """奔跑任务参数。"""
 
+    # torso 高度合理区间下限（米）
+    height_low: float = 1.0
+    # torso 高度合理区间上限（米）
+    height_high: float = 1.5
+    # 高度 tolerance 的 margin
+    height_margin: float = 0.3
+    # 早期终止高度阈值（米），低于此值视为倒下
+    terminate_height: float = 0.9
+    # 目标前进速度（m/s），正值向前，负值向后
+    target_speed: float = 5.0
+    # 前进速度 tolerance 的 margin
+    speed_margin: float = 5.0
+    # z 方向速度 tolerance 的 margin（防跳）
+    z_velocity_margin: float = 3.0
+    # 脚部着地判定高度上限（米）
+    foot_ground_height: float = 0.25
+    # 脚部着地 tolerance 的 margin
+    foot_ground_margin: float = 0.25
+
 
 # 全局默认配置实例
 _STAND = StandConfig()
@@ -230,8 +249,11 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             )
 
         # 早期终止：walk/run 任务中 torso 高度低于阈值视为倒下
-        if self.task in ("walk_fwd", "walk_bwd", "run_fwd", "run_bwd"):
+        if self.task in ("walk_fwd", "walk_bwd"):
             if self._get_torso_height() < _WALK.terminate_height:
+                terms = {agent: True for agent in terms}
+        if self.task in ("run_fwd", "run_bwd"):
+            if self._get_torso_height() < _RUN.terminate_height:
                 terms = {agent: True for agent in terms}
 
         return obs, rewards, terms, truncs, infos
@@ -364,9 +386,9 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
         elif task == "walk_bwd":
             return self._walk_bwd_reward(infos)
         elif task == "run_fwd":
-            raise NotImplementedError("run_fwd 奖励尚未实现")
+            return self._run_fwd_reward(infos)
         elif task == "run_bwd":
-            raise NotImplementedError("run_bwd 奖励尚未实现")
+            return self._run_bwd_reward(infos)
         else:
             raise NotImplementedError(
                 f"任务 {task!r} 尚未实现"
@@ -545,6 +567,144 @@ class Walker2dMultiTask(MultiAgentMujocoEnv):
             left_z,
             bounds=(0.0, _WALK.foot_ground_height),
             margin=_WALK.foot_ground_margin,
+        )
+        grounded = max(right_ground, left_ground)
+
+        return (
+            standing
+            * upright
+            * move
+            * smooth_z
+            * grounded
+        )
+
+    def _run_fwd_reward(
+        self,
+        infos: dict[str, dict],
+    ) -> float:
+        """
+        向前奔跑任务奖励。
+
+        综合五个因子:
+            - standing: torso 高度在合理区间内时满分
+            - upright: 躯干直立度映射到 [0, 1]
+            - move: 水平速度达到目标速度时满分
+            - smooth_z: z 方向速度接近 0 时满分（防跳）
+            - grounded: 至少一只脚着地时满分（防飞行）
+        合并公式: standing × upright × move × smooth_z × grounded
+
+        返回:
+            [0, 1] 区间内的奖励值。
+        """
+        # 高度在合理区间
+        standing = tolerance(
+            self._get_torso_height(),
+            bounds=(
+                _RUN.height_low,
+                _RUN.height_high,
+            ),
+            margin=_RUN.height_margin,
+        )
+
+        # 躯干直立
+        upright = (1 + 5 * self._get_torso_upright()) / 6
+
+        # 水平速度达到目标（正方向）
+        vx = self._get_x_velocity(infos)
+        move = tolerance(
+            vx,
+            bounds=(_RUN.target_speed, float("inf")),
+            margin=_RUN.speed_margin,
+        )
+
+        # z 方向速度接近 0（防跳）
+        vz = self._get_z_velocity()
+        smooth_z = tolerance(
+            vz,
+            bounds=(0.0, 0.0),
+            margin=_RUN.z_velocity_margin,
+        )
+
+        # 至少一只脚着地（防飞行相）
+        right_z, left_z = self._get_foot_heights()
+        right_ground = tolerance(
+            right_z,
+            bounds=(0.0, _RUN.foot_ground_height),
+            margin=_RUN.foot_ground_margin,
+        )
+        left_ground = tolerance(
+            left_z,
+            bounds=(0.0, _RUN.foot_ground_height),
+            margin=_RUN.foot_ground_margin,
+        )
+        grounded = max(right_ground, left_ground)
+
+        return (
+            standing
+            * upright
+            * move
+            * smooth_z
+            * grounded
+        )
+
+    def _run_bwd_reward(
+        self,
+        infos: dict[str, dict],
+    ) -> float:
+        """
+        向后奔跑任务奖励。
+
+        综合五个因子:
+            - standing: torso 高度在合理区间内时满分
+            - upright: 躯干直立度映射到 [0, 1]
+            - move: 水平速度达到目标负速度时满分
+            - smooth_z: z 方向速度接近 0 时满分（防跳）
+            - grounded: 至少一只脚着地时满分（防飞行）
+        合并公式: standing × upright × move × smooth_z × grounded
+
+        返回:
+            [0, 1] 区间内的奖励值。
+        """
+        # 高度在合理区间
+        standing = tolerance(
+            self._get_torso_height(),
+            bounds=(
+                _RUN.height_low,
+                _RUN.height_high,
+            ),
+            margin=_RUN.height_margin,
+        )
+
+        # 躯干直立
+        upright = (1 + 5 * self._get_torso_upright()) / 6
+
+        # 水平速度达到目标（负方向）
+        vx = self._get_x_velocity(infos)
+        move = tolerance(
+            vx,
+            bounds=(float("-inf"), -_RUN.target_speed),
+            margin=_RUN.speed_margin,
+        )
+
+        # z 方向速度接近 0（防跳）
+        vz = self._get_z_velocity()
+        smooth_z = tolerance(
+            vz,
+            bounds=(0.0, 0.0),
+            margin=_RUN.z_velocity_margin,
+        )
+
+        # 至少一只脚着地（防飞行相）
+        right_z, left_z = self._get_foot_heights()
+        right_ground = tolerance(
+            right_z,
+            bounds=(0.0, _RUN.foot_ground_height),
+            margin=_RUN.foot_ground_margin,
+        )
+        left_ground = tolerance(
+            left_z,
+            bounds=(0.0, _RUN.foot_ground_height),
+            margin=_RUN.foot_ground_margin,
         )
         grounded = max(right_ground, left_ground)
 
