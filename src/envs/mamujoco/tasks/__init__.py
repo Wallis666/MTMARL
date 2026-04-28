@@ -24,31 +24,35 @@ ENV_REGISTRY = {
 # 预设智能体分割配置的默认参数。
 # 键为可读的配置名称，值包含构建环境所需的完整参数。
 ARGS_REGISTRY = {
-    "HalfCheetah": {
+    "2_Agent_HalfCheetah": {
         "agent_conf": "2x3",
         "agent_obsk": 1,
     },
-    "Hopper": {
+    "6_Agent_HalfCheetah": {
+        "agent_conf": "6x1",
+        "agent_obsk": 1,
+    },
+    "3_Agent_Hopper": {
         "agent_conf": "3x1",
         "agent_obsk": 1,
     },
-    "Humanoid": {
+    "2_Agent_Humanoid": {
         "agent_conf": "9|8",
         "agent_obsk": 1,
     },
-    "HumanoidStandup": {
+    "2_Agent_HumanoidStandup": {
         "agent_conf": "9|8",
         "agent_obsk": 1,
     },
-    "Walker2d": {
+    "2_Agent_Walker2d": {
         "agent_conf": "2x3",
         "agent_obsk": 1,
     },
-    "Swimmer": {
+    "2_Agent_Swimmer": {
         "agent_conf": "2x1",
         "agent_obsk": 1,
     },
-    "Reacher": {
+    "2_Agent_Reacher": {
         "agent_conf": "2x1",
         "agent_obsk": 1,
     },
