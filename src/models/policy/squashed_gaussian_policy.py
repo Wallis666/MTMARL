@@ -11,7 +11,7 @@ LOG_STD_MAX = 2
 LOG_STD_MIN = -10
 
 
-class WorldModelPolicy(nn.Module):
+class SquashedGaussianPolicy(nn.Module):
     """用于 HASAC 的压缩高斯策略网络。"""
 
     def __init__(
