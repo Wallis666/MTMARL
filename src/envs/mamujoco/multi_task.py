@@ -395,6 +395,21 @@ class MultiTaskMaMuJoCo:
     # 环境交互
     # ----------------------------------------------------------------
 
+    def seed(
+        self,
+        seed: int,
+    ) -> None:
+        """
+        设置随机种子，将在下次 reset 时生效。
+
+        为兼容旧版 gym 的 env.seed() 调用方式，种子
+        会被暂存，并在 reset 时透传给底层环境。
+
+        参数:
+            seed: 随机种子。
+        """
+        self._seed = int(seed)
+
     def reset(
         self,
         seed: int | None = None,
@@ -403,11 +418,15 @@ class MultiTaskMaMuJoCo:
         重置当前任务的底层环境并返回统一维度的观测。
 
         参数:
-            seed: 随机种子，透传给底层环境。
+            seed: 随机种子，透传给底层环境。若为 None
+                则使用 seed() 方法暂存的种子。
 
         返回:
             (观测, 信息) 二元组，观测已对齐为统一维度。
         """
+        if seed is None:
+            seed = getattr(self, "_seed", None)
+            self._seed = None
         raw_obs, raw_infos = self.env.reset(seed=seed)
         obs = self._pad_obs(raw_obs)
 
